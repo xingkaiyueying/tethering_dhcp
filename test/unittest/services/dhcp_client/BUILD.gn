@@ -24,6 +24,7 @@ config("module_private_config") {
 ohos_unittest("dhcp_client_unittest") {
   module_out_path = module_output_path
   sources = [
+    "dhcp_l3_v2_contract_test.cpp",
     "$DHCP_ROOT_DIR/services/dhcp_client/src/dhcp_client_callback_proxy.cpp",
     "$DHCP_ROOT_DIR/services/dhcp_client/src/dhcp_client_death_recipient.cpp",
     "$DHCP_ROOT_DIR/services/dhcp_client/src/dhcp_client_service_impl.cpp",
