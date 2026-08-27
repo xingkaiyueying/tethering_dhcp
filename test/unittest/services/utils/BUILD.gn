@@ -50,6 +50,7 @@ ohos_unittest("dhcp_util_unittest") {
     "dhcp_permission_utils_test.cpp",
     "dhcp_system_timer_test.cpp",
     "dhcp_thread_test.cpp",
+    "dhcp_l3_lease_timing_test.cpp",
   ]
 
   include_dirs = [
