@@ -12,6 +12,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <algorithm>
+#include <vector>
+
 #include "dhcp_client_callback_proxy.h"
 #include "dhcp_client_stub.h"
 #include "dhcp_logger.h"
@@ -165,6 +168,16 @@ int DhcpClientStub::OnStartDhcpClient(uint32_t code, MessageParcel &data, Messag
     config.bSpecificNetwork = data.ReadBool();
     config.isStaticIpv4 = data.ReadBool();
     config.bIpv4 = data.ReadBool();
+    uint8_t linkMode = data.ReadUint8();
+    std::vector<uint8_t> clientKey;
+    if (linkMode > static_cast<uint8_t>(DhcpLinkMode::L3_TUN) || !data.ReadUInt8Vector(&clientKey) ||
+        clientKey.size() != config.clientKey.size()) {
+        reply.WriteInt32(0);
+        reply.WriteInt32(DHCP_E_INVALID_PARAM);
+        return 0;
+    }
+    config.linkMode = static_cast<DhcpLinkMode>(linkMode);
+    std::copy(clientKey.begin(), clientKey.end(), config.clientKey.begin());
     ErrCode ret = StartDhcpClient(config);
     reply.WriteInt32(0);
     reply.WriteInt32(ret);

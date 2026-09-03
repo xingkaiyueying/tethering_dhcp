@@ -141,9 +141,30 @@ int DhcpClientStub::OnStartDhcpClient(uint32_t code, IpcIo *req, IpcIo *reply)
     (void)ReadBool(req, &config.bSpecificNetwork);
     (void)ReadBool(req, &config.isStaticIpv4);
     (void)ReadBool(req, &config.bIpv4);
+    int32_t linkMode = 0;
+    int32_t clientKeyLen = 0;
+    if (!ReadInt32(req, &linkMode) || !ReadInt32(req, &clientKeyLen) ||
+        linkMode < 0 || linkMode > static_cast<int32_t>(DhcpLinkMode::L3_TUN) ||
+        clientKeyLen != static_cast<int32_t>(config.clientKey.size())) {
+        (void)WriteInt32(reply, 0);
+        (void)WriteInt32(reply, DHCP_E_INVALID_PARAM);
+        return DHCP_OPT_FAILED;
+    }
+    config.linkMode = static_cast<DhcpLinkMode>(linkMode);
+    for (uint8_t &value : config.clientKey) {
+        int32_t item = 0;
+        if (!ReadInt32(req, &item) || item < 0 || item > 0xFF) {
+            (void)WriteInt32(reply, 0);
+            (void)WriteInt32(reply, DHCP_E_INVALID_PARAM);
+            return DHCP_OPT_FAILED;
+        }
+        value = static_cast<uint8_t>(item);
+    }
     DHCP_LOGI("ifname:%{public}s prohibitUseCacheIp:%{public}d, bIpv6:%{public}d, bSpecificNetwork:%{public}d",
         ifname.c_str(), config.prohibitUseCacheIp, config.bIpv6, config.bSpecificNetwork);
 
+    config.ifname = ifname;
+    config.bssid = bssid;
     ret = StartDhcpClient(config);
     (void)WriteInt32(reply, 0);
     (void)WriteInt32(reply, ret);

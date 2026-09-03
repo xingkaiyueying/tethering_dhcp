@@ -160,6 +160,11 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
     (void)WriteBool(&req, config.bSpecificNetwork);
     (void)WriteBool(&req, config.isStaticIpv4);
     (void)WriteBool(&req, config.bIpv4);
+    (void)WriteInt32(&req, static_cast<int32_t>(config.linkMode));
+    (void)WriteInt32(&req, static_cast<int32_t>(config.clientKey.size()));
+    for (uint8_t value : config.clientKey) {
+        (void)WriteInt32(&req, value);
+    }
     owner.funcId = static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT);
     int error = remote_->Invoke(remote_,
         static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT), &req,
@@ -173,8 +178,8 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
         DHCP_LOGE("exception failed, exception:%{public}d", owner.exception);
         return DHCP_E_FAILED;
     }
-    DHCP_LOGI("StartDhcpClient ok, exception:%{public}d", owner.exception);
-    return DHCP_E_SUCCESS;
+    DHCP_LOGI("StartDhcpClient completed, ret:%{public}d", owner.retCode);
+    return owner.retCode;
 }
 
 ErrCode DhcpClientProxy::DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)

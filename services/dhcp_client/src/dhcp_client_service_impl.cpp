@@ -262,6 +262,8 @@ ErrCode DhcpClientServiceImpl::StartDhcpClient(const RouterConfig &config)
     innerCfg.bSpecificNetwork = config.bSpecificNetwork;
     innerCfg.isStaticIpv4 = config.isStaticIpv4;
     innerCfg.bIpv4 = config.bIpv4;
+    innerCfg.linkMode = config.linkMode;
+    innerCfg.clientKey = config.clientKey;
     {
         std::lock_guard<std::mutex> autoLock(m_clientServiceMutex);
         auto iter = m_mapClientService.find(innerCfg.ifname);

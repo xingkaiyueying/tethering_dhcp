@@ -19,6 +19,7 @@
 #include <sys/time.h>
 #include <cerrno>
 #include <sys/types.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <chrono>
@@ -240,7 +241,17 @@ int DhcpClientStateMachine::InitSpecifiedClientCfg(const std::string &ifname, bo
 
 int DhcpClientStateMachine::GetClientNetworkInfo(void)
 {
-    if (GetLocalInterface(m_cltCnf.ifaceName, &m_cltCnf.ifaceIndex, m_cltCnf.ifaceMac, NULL) != DHCP_OPT_SUCCESS) {
+    if (m_routerCfg.linkMode == DhcpLinkMode::L3_TUN) {
+        m_cltCnf.ifaceIndex = static_cast<int>(if_nametoindex(m_cltCnf.ifaceName));
+        if (m_cltCnf.ifaceIndex == 0 ||
+            memcpy_s(m_cltCnf.ifaceMac, sizeof(m_cltCnf.ifaceMac), m_routerCfg.clientKey.data(),
+                m_routerCfg.clientKey.size()) != EOK) {
+            DHCP_LOGE("[IpShare][DHCP] L3 TUN identity failed, ifaceName:%{public}s.", m_cltCnf.ifaceName);
+            return DHCP_OPT_FAILED;
+        }
+        DHCP_LOGI("[IpShare][DHCP] L3 TUN identity selected, ifaceName:%{public}s.", m_cltCnf.ifaceName);
+    } else if (GetLocalInterface(m_cltCnf.ifaceName, &m_cltCnf.ifaceIndex, m_cltCnf.ifaceMac, NULL) !=
+        DHCP_OPT_SUCCESS) {
         DHCP_LOGE("GetClientNetworkInfo() GetLocalInterface failed, ifaceName:%{public}s.", m_cltCnf.ifaceName);
         return DHCP_OPT_FAILED;
     }
@@ -1270,9 +1281,13 @@ void DhcpClientStateMachine::DhcpAckOrNakPacketHandle(uint8_t type, struct DhcpP
         DHCP_LOGI("DhcpAckOrNakPacketHandle() use cache DNS addr, size:%{public}zu", ipCached.ipResult.dnsAddr.size());
         m_dhcpIpResult.dnsAddr = ipCached.ipResult.dnsAddr;
     }
-    if (m_dhcp4State == DHCP_STATE_REQUESTING || m_dhcp4State == DHCP_STATE_INITREBOOT) {
+    if ((m_dhcp4State == DHCP_STATE_REQUESTING || m_dhcp4State == DHCP_STATE_INITREBOOT) &&
+        m_routerCfg.linkMode != DhcpLinkMode::L3_TUN) {
         IpConflictDetect();
     } else {
+        if (m_routerCfg.linkMode == DhcpLinkMode::L3_TUN) {
+            DHCP_LOGI("[IpShare][DHCP] ACK accepted without ARP or DECLINE on L3 TUN.");
+        }
         if (PublishDhcpResultEvent(m_cltCnf.ifaceName, PUBLISH_CODE_SUCCESS, &m_dhcpIpResult) != DHCP_OPT_SUCCESS) {
             DHCP_LOGE("DhcpAckOrNakPacketHandle PublishDhcpResultEvent result failed!");
             return;
@@ -1531,6 +1546,9 @@ int DhcpClientStateMachine::GetPacketHeaderInfo(struct DhcpPacket *packet, uint8
     packet->htype = ETHERNET_TYPE;
     packet->hlen = ETHERNET_LEN;
     packet->cookie = htonl(MAGIC_COOKIE);
+    if (m_routerCfg.linkMode == DhcpLinkMode::L3_TUN) {
+        packet->flags = BROADCAST_FLAG;
+    }
     packet->options[0] = END_OPTION;
     AddOptValueToOpts(packet->options, DHCP_MESSAGE_TYPE_OPTION, type);
 
@@ -1700,9 +1718,19 @@ int DhcpClientStateMachine::DhcpRenew(uint32_t transid, uint32_t clientip, uint3
     packet.xid = transid;
     /* Set Renew Request seconds elapsed. */
     SetSecondsElapsed(&packet);
-    packet.ciaddr = clientip;
+    packet.ciaddr = m_routerCfg.linkMode == DhcpLinkMode::L3_TUN ? 0 : clientip;
     AddParamaterRequestList(&packet);
     AddOptValueToOpts(packet.options, MAXIMUM_DHCP_MESSAGE_SIZE_OPTION, MAX_MSG_SIZE); //57
+
+    if (m_routerCfg.linkMode == DhcpLinkMode::L3_TUN) {
+        AddOptValueToOpts(packet.options, REQUESTED_IP_ADDRESS_OPTION, clientip);
+        if (serverip != 0) {
+            AddOptValueToOpts(packet.options, SERVER_IDENTIFIER_OPTION, serverip);
+        }
+        DHCP_LOGI("[IpShare][DHCP] renew with stable L3 TUN identity by broadcast.");
+        return SendToDhcpPacket(&packet, INADDR_ANY, INADDR_BROADCAST, m_cltCnf.ifaceIndex,
+            (uint8_t *)MAC_BCAST_ADDR);
+    }
 
     /* Begin broadcast or unicast dhcp request packet. */
     if (serverip == 0) {

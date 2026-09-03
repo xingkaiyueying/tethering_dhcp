@@ -1,0 +1,10 @@
+import("//build/ohos.gni")
+
+ohos_executable("sleip_dhcp_stage2") {
+  sources = [ "sleip_dhcp_stage2.c" ]
+  include_dirs = [ "../../interfaces/kits/c" ]
+  deps = [ "//foundation/communication/dhcp/frameworks/native:dhcp_sdk" ]
+  subsystem_name = "communication"
+  part_name = "dhcp"
+  install_enable = true
+}
