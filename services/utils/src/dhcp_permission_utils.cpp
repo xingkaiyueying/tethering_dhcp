@@ -42,11 +42,9 @@ bool DhcpPermissionUtils::VerifyIsNativeProcess()
     Security::AccessToken::ATokenTypeEnum callingType =
         Security::AccessToken::AccessTokenKit::GetTokenTypeFlag(tokenId);
     if (callingType == Security::AccessToken::TOKEN_NATIVE) {
-        DHCP_LOGI("[DHCP][Permission] native process check passed, token:%{public}u", tokenId);
         return true;
     }
-    DHCP_LOGE("[DHCP][Permission] native process check failed, token:%{public}u type:%{public}d", tokenId,
-        callingType);
+    DHCP_LOGE("VerifyIsNativeProcess false, callingType:%{public}d is not a native process.", callingType);
     return false;
 #else
     DHCP_LOGI("VerifyIsNativeProcess OHOS_ARCH_LITE permission granted!");
@@ -63,10 +61,9 @@ bool DhcpPermissionUtils::VerifyDhcpNetworkPermission(const std::string &permiss
 #ifndef OHOS_ARCH_LITE
     if (!(DhcpPermissionUtils::GetInstance().VerifyPermission(permissionName, IPCSkeleton::GetCallingRealPid(),
         IPCSkeleton::GetCallingUid(), 0))) {
-        DHCP_LOGE("[DHCP][Permission] permission check failed, permission:%{public}s", permissionName.c_str());
+        DHCP_LOGE("VerifyDhcpNetworkPermission VerifyPermission denied!");
         return false;
     }
-    DHCP_LOGI("[DHCP][Permission] permission check passed, permission:%{public}s", permissionName.c_str());
     return true;
 #else
     DHCP_LOGI("VerifyDhcpNetworkPermission OHOS_ARCH_LITE permission granted!");
