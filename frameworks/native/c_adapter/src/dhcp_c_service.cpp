@@ -12,8 +12,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <algorithm>
-
 #include "kits/c/dhcp_c_api.h"
 #include "inner_api/dhcp_client.h"
 #include "inner_api/dhcp_server.h"
@@ -90,7 +88,8 @@ NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
     routerConfig.isStaticIpv4 = config.isStaticIpv4;
     routerConfig.bIpv4 = config.bIpv4;
     routerConfig.linkMode = static_cast<OHOS::DHCP::DhcpLinkMode>(config.linkMode);
-    std::copy_n(config.clientKey, routerConfig.clientKey.size(), routerConfig.clientKey.begin());
+    routerConfig.clientKey = { config.clientKey[0], config.clientKey[1], config.clientKey[2],
+        config.clientKey[3], config.clientKey[4], config.clientKey[5] };
     return GetCErrorCode(dhcpClientPtr->StartDhcpClient(routerConfig));
 }
 
