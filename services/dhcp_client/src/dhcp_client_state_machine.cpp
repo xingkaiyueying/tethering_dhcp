@@ -160,16 +160,11 @@ int DhcpClientStateMachine::StartIpv4Type(const std::string &ifname, bool isIpv6
     StartTimer(TIMER_GET_IP, getIpTimerId, timeOut_, true);
 #endif
     if (InitConfig(ifname, isIpv6) != DHCP_OPT_SUCCESS) {
-        DHCP_LOGE("[DHCP][StateMachine] start failed during init, ifname:%{public}s", ifname.c_str());
+        DHCP_LOGE("StartIpv4Type InitConfig failed!");
         return DHCP_OPT_FAILED;
     }
     if ((m_action == ACTION_START_NEW) || (m_action == ACTION_START_OLD)) {
-        int ret = InitStartIpv4Thread(ifname, isIpv6);
-        if (ret != DHCP_OPT_SUCCESS) {
-            DHCP_LOGE("[DHCP][StateMachine] start failed while scheduling worker, ifname:%{public}s ret:%{public}d",
-                ifname.c_str(), ret);
-            return ret;
-        }
+        InitStartIpv4Thread(ifname, isIpv6);
     } else {
         DHCP_LOGI("StartIpv4Type not supported m_action:%{public}d", m_action);
     }
