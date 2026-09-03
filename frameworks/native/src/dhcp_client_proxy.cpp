@@ -177,8 +177,8 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
         DHCP_LOGE("exception failed, exception:%{public}d", exception);
         return DHCP_E_FAILED;
     }
-    ErrCode ret = reply.ReadInt32();
-    DHCP_LOGI("StartDhcpClient completed, ret:%{public}d", ret);
+    ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
+    DHCP_LOGI("StartDhcpClient completed, ret:%{public}d", static_cast<int32_t>(ret));
     return ret;
 }
 

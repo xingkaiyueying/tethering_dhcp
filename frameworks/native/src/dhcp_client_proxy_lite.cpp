@@ -179,7 +179,7 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
         return DHCP_E_FAILED;
     }
     DHCP_LOGI("StartDhcpClient completed, ret:%{public}d", owner.retCode);
-    return owner.retCode;
+    return static_cast<ErrCode>(owner.retCode);
 }
 
 ErrCode DhcpClientProxy::DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)
