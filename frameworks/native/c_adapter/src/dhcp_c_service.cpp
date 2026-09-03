@@ -38,12 +38,18 @@ namespace {
 
 NO_SANITIZE("cfi")  DhcpErrorCode RegisterDhcpClientCallBack(const char *ifname, const ClientCallBack *event)
 {
-    CHECK_PTR_RETURN(ifname, DHCP_INVALID_PARAM);
-    CHECK_PTR_RETURN(event, DHCP_INVALID_PARAM);
+    if (ifname == nullptr || event == nullptr) {
+        DHCP_LOGE("[DHCP][CAdapter] register callback failed: invalid parameter");
+        return DHCP_INVALID_PARAM;
+    }
+    DHCP_LOGI("[DHCP][CAdapter] register callback begin, ifname:%{public}s", ifname);
     if (dhcpClientPtr == nullptr) {
         dhcpClientPtr = OHOS::DHCP::DhcpClient::GetInstance(DHCP_CLIENT_ABILITY_ID);
     }
-    CHECK_PTR_RETURN(dhcpClientPtr, DHCP_INVALID_PARAM);
+    if (dhcpClientPtr == nullptr) {
+        DHCP_LOGE("[DHCP][CAdapter] register callback failed: client instance unavailable");
+        return DHCP_INVALID_PARAM;
+    }
 #ifdef OHOS_ARCH_LITE
     if (dhcpClientCallBack == nullptr) {
         dhcpClientCallBack = std::shared_ptr<DhcpClientCallBack>(new (std::nothrow)DhcpClientCallBack());
@@ -53,9 +59,14 @@ NO_SANITIZE("cfi")  DhcpErrorCode RegisterDhcpClientCallBack(const char *ifname,
         dhcpClientCallBack = OHOS::sptr<DhcpClientCallBack>(new (std::nothrow)DhcpClientCallBack());
     }
 #endif
-    CHECK_PTR_RETURN(dhcpClientCallBack, DHCP_INVALID_PARAM);
+    if (dhcpClientCallBack == nullptr) {
+        DHCP_LOGE("[DHCP][CAdapter] register callback failed: callback allocation");
+        return DHCP_INVALID_PARAM;
+    }
     dhcpClientCallBack->RegisterCallBack(ifname, event);
-    return GetCErrorCode(dhcpClientPtr->RegisterDhcpClientCallBack(ifname, dhcpClientCallBack));
+    DhcpErrorCode ret = GetCErrorCode(dhcpClientPtr->RegisterDhcpClientCallBack(ifname, dhcpClientCallBack));
+    DHCP_LOGI("[DHCP][CAdapter] register callback complete, ifname:%{public}s ret:%{public}d", ifname, ret);
+    return ret;
 }
 
 DhcpErrorCode RegisterDhcpClientReportCallBack(const char *ifname, const DhcpClientReport *event)
@@ -78,7 +89,11 @@ DhcpErrorCode RegisterDhcpClientReportCallBack(const char *ifname, const DhcpCli
 
 NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
 {
-    CHECK_PTR_RETURN(dhcpClientPtr, DHCP_INVALID_PARAM);
+    if (dhcpClientPtr == nullptr) {
+        DHCP_LOGE("[DHCP][CAdapter] start failed: callback must be registered first");
+        return DHCP_INVALID_PARAM;
+    }
+    DHCP_LOGI("[DHCP][CAdapter] start begin, ifname:%{public}s mode:%{public}u", config.ifname, config.linkMode);
     OHOS::DHCP::RouterConfig routerConfig;
     routerConfig.ifname = config.ifname;
     routerConfig.bssid = config.bssid;
@@ -90,7 +105,13 @@ NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
     routerConfig.linkMode = static_cast<OHOS::DHCP::DhcpLinkMode>(config.linkMode);
     routerConfig.clientKey = { config.clientKey[0], config.clientKey[1], config.clientKey[2],
         config.clientKey[3], config.clientKey[4], config.clientKey[5] };
-    return GetCErrorCode(dhcpClientPtr->StartDhcpClient(routerConfig));
+    DhcpErrorCode ret = GetCErrorCode(dhcpClientPtr->StartDhcpClient(routerConfig));
+    if (ret != DHCP_SUCCESS) {
+        DHCP_LOGE("[DHCP][CAdapter] start failed, ifname:%{public}s ret:%{public}d", config.ifname, ret);
+    } else {
+        DHCP_LOGI("[DHCP][CAdapter] start accepted, ifname:%{public}s", config.ifname);
+    }
+    return ret;
 }
 
 DhcpErrorCode DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)

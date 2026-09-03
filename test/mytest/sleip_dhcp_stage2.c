@@ -21,8 +21,13 @@ static atomic_int g_clientDone;
 static atomic_int g_clientPassed;
 static DhcpResult g_clientResult;
 
+extern int SetDhcpProbeToken(void);
+
+#define DHCP_LOG(fmt, ...) printf("[DHCP][PROBE] " fmt "\n", ##__VA_ARGS__)
+
 static void PrintResult(bool passed, const char *phase, int code)
 {
+    DHCP_LOG("complete phase=%s result=%s code=%d", phase, passed ? "PASS" : "FAIL", code);
     printf("RESULT=%s phase=%s code=%d\n", passed ? "PASS" : "FAIL", phase, code);
 }
 
@@ -32,6 +37,7 @@ static bool ParseClientKey(const char *text, uint8_t key[DHCP_CLIENT_KEY_LEN])
     char tail = '\0';
     if (sscanf(text, "%2x:%2x:%2x:%2x:%2x:%2x%c", &value[0], &value[1], &value[2], &value[3],
         &value[4], &value[5], &tail) != DHCP_CLIENT_KEY_LEN) {
+        DHCP_LOG("client key parse failed");
         return false;
     }
     for (size_t i = 0; i < DHCP_CLIENT_KEY_LEN; ++i) {
@@ -52,20 +58,21 @@ static bool IsExpectedLease(const char *address)
 
 static void OnIpSuccess(int status, const char *ifname, DhcpResult *result)
 {
-    (void)status;
-    (void)ifname;
+    DHCP_LOG("client success callback iface=%s status=%d result=%s", ifname == NULL ? "-" : ifname, status,
+        result == NULL ? "null" : "present");
     if (result != NULL) {
         g_clientResult = *result;
         atomic_store(&g_clientPassed, result->isOptSuc && IsExpectedLease(result->strOptClientId));
+        DHCP_LOG("lease validation opt_success=%d in_expected_range=%d", result->isOptSuc,
+            IsExpectedLease(result->strOptClientId));
     }
     atomic_store(&g_clientDone, 1);
 }
 
 static void OnIpFail(int status, const char *ifname, const char *reason)
 {
-    (void)status;
-    (void)ifname;
-    (void)reason;
+    DHCP_LOG("client failure callback iface=%s status=%d reason=%s", ifname == NULL ? "-" : ifname, status,
+        reason == NULL ? "-" : reason);
     atomic_store(&g_clientDone, 1);
 }
 
@@ -102,6 +109,7 @@ static int RunPacketVector(void)
 
 static int RunServerStart(const char *ifname, const char *start, const char *end)
 {
+    DHCP_LOG("server flow begin iface=%s range=%s-%s", ifname, start, end);
     DhcpRange range = {0};
     range.iptype = 0;
     range.leaseHours = 6;
@@ -110,8 +118,12 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
     snprintf(range.strEndip, sizeof(range.strEndip), "%s", end);
     snprintf(range.strSubnet, sizeof(range.strSubnet), "255.255.255.0");
     DhcpErrorCode ret = SetDhcpRange(ifname, &range);
+    DHCP_LOG("server range configured iface=%s ret=%d", ifname, ret);
     if (ret == DHCP_SUCCESS) {
         ret = StartDhcpServer(ifname);
+        DHCP_LOG("server start requested iface=%s ret=%d", ifname, ret);
+    } else {
+        DHCP_LOG("server flow exit before start: SetDhcpRange failed ret=%d", ret);
     }
     PrintResult(ret == DHCP_SUCCESS, "SERVING", ret);
     return ret == DHCP_SUCCESS ? 0 : 1;
@@ -119,6 +131,7 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
 
 static int RunClientStart(const char *ifname, const char *keyText)
 {
+    DHCP_LOG("client flow begin iface=%s mode=L3_TUN", ifname);
     RouterConfig config = {0};
     ClientCallBack callback = {OnIpSuccess, OnIpFail};
     snprintf(config.ifname, sizeof(config.ifname), "%s", ifname);
@@ -133,13 +146,22 @@ static int RunClientStart(const char *ifname, const char *keyText)
     atomic_store(&g_clientDone, 0);
     atomic_store(&g_clientPassed, 0);
     DhcpErrorCode ret = RegisterDhcpClientCallBack(ifname, &callback);
+    DHCP_LOG("client callback registration iface=%s ret=%d", ifname, ret);
     if (ret == DHCP_SUCCESS) {
         ret = StartDhcpClient(&config);
+        DHCP_LOG("client start requested iface=%s ret=%d", ifname, ret);
+    } else {
+        DHCP_LOG("client flow exit before start: callback registration failed ret=%d", ret);
     }
     for (int i = 0; ret == DHCP_SUCCESS && !atomic_load(&g_clientDone) && i < WAIT_SECONDS; ++i) {
         sleep(1);
     }
     bool passed = ret == DHCP_SUCCESS && atomic_load(&g_clientPassed);
+    if (ret == DHCP_SUCCESS && !atomic_load(&g_clientDone)) {
+        DHCP_LOG("client lease wait timed out after %d seconds", WAIT_SECONDS);
+    } else if (ret == DHCP_SUCCESS && !atomic_load(&g_clientPassed)) {
+        DHCP_LOG("client callback completed but lease validation failed");
+    }
     printf("lease=%s\n", passed ? g_clientResult.strOptClientId : "-");
     PrintResult(passed, passed ? "BOUND" : "REQUEST", passed ? 0 : (ret == DHCP_SUCCESS ? -1 : ret));
     return passed ? 0 : 1;
@@ -147,9 +169,11 @@ static int RunClientStart(const char *ifname, const char *keyText)
 
 static int RunStatus(const char *ifname)
 {
+    DHCP_LOG("status query begin iface=%s", ifname);
     DhcpStationInfo stations[16] = {0};
     int size = 0;
     DhcpErrorCode ret = GetDhcpClientInfos(ifname, 16, stations, &size);
+    DHCP_LOG("status query complete iface=%s ret=%d leases=%d", ifname, ret, size);
     bool passed = ret == DHCP_SUCCESS || ret == DHCP_FAILED;
     printf("iface=%s leases=%d\n", ifname, size);
     PrintResult(passed, size > 0 ? "BOUND" : "IDLE", passed ? 0 : ret);
@@ -158,8 +182,11 @@ static int RunStatus(const char *ifname)
 
 static int RunStop(const char *ifname)
 {
+    DHCP_LOG("stop flow begin iface=%s", ifname);
     DhcpErrorCode clientRet = StopDhcpClient(ifname, false, true);
+    DHCP_LOG("client stop complete iface=%s ret=%d", ifname, clientRet);
     DhcpErrorCode serverRet = StopDhcpServer(ifname);
+    DHCP_LOG("server stop complete iface=%s ret=%d", ifname, serverRet);
     bool passed = (clientRet == DHCP_SUCCESS || clientRet == DHCP_FAILED) &&
         (serverRet == DHCP_SUCCESS || serverRet == DHCP_FAILED);
     printf("client_stop=%d server_stop=%d\n", clientRet, serverRet);
@@ -175,6 +202,18 @@ static void Usage(const char *program)
 
 int main(int argc, char *argv[])
 {
+    DHCP_LOG("probe begin command=%s", argc > 1 ? argv[1] : "-");
+    bool needsDhcpPermission = argc > 1 && (strcmp(argv[1], "server-start") == 0 ||
+        strcmp(argv[1], "client-start") == 0 || strcmp(argv[1], "status") == 0 || strcmp(argv[1], "stop") == 0);
+    if (needsDhcpPermission) {
+        int tokenRet = SetDhcpProbeToken();
+        if (tokenRet != 0) {
+            DHCP_LOG("native token setup failed ret=%d", tokenRet);
+            PrintResult(false, "AUTH", tokenRet);
+            return 1;
+        }
+        DHCP_LOG("native token setup succeeded permission=ohos.permission.NETWORK_DHCP");
+    }
     if (argc == 2 && strcmp(argv[1], "config-roundtrip") == 0) return RunConfigRoundtrip();
     if (argc == 2 && strcmp(argv[1], "packet-vector") == 0) return RunPacketVector();
     if (argc == 5 && strcmp(argv[1], "server-start") == 0) return RunServerStart(argv[2], argv[3], argv[4]);

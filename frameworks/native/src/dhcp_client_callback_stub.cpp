@@ -88,7 +88,8 @@ void DhcpClientCallBackStub::SetRemoteDied(bool val)
 
 void DhcpClientCallBackStub::OnIpSuccessChanged(int status, const std::string& ifname, DhcpResult& result)
 {
-    DHCP_LOGI("OnIpSuccessChanged, status:%{public}d!", status);
+    DHCP_LOGI("[DHCP][CallbackStub] success callback received, ifname:%{public}s status:%{public}d",
+        ifname.c_str(), status);
     sptr<IDhcpClientCallBack> tempCallback;
     {
         std::unique_lock<std::mutex> lock(callbackMutex_);
@@ -96,12 +97,16 @@ void DhcpClientCallBackStub::OnIpSuccessChanged(int status, const std::string& i
     }
     if (tempCallback) {
         tempCallback->OnIpSuccessChanged(status, ifname, result);
+        DHCP_LOGI("[DHCP][CallbackStub] success callback dispatched, ifname:%{public}s", ifname.c_str());
+    } else {
+        DHCP_LOGE("[DHCP][CallbackStub] success callback dropped: target is null, ifname:%{public}s", ifname.c_str());
     }
 }
 
 void DhcpClientCallBackStub::OnIpFailChanged(int status, const std::string& ifname, const std::string& reason)
 {
-    DHCP_LOGI("OnIpFailChanged, status:%{public}d!", status);
+    DHCP_LOGI("[DHCP][CallbackStub] failure callback received, ifname:%{public}s status:%{public}d",
+        ifname.c_str(), status);
     sptr<IDhcpClientCallBack> tempCallback;
     {
         std::unique_lock<std::mutex> lock(callbackMutex_);
@@ -109,6 +114,9 @@ void DhcpClientCallBackStub::OnIpFailChanged(int status, const std::string& ifna
     }
     if (tempCallback) {
         tempCallback->OnIpFailChanged(status, ifname, reason);
+        DHCP_LOGI("[DHCP][CallbackStub] failure callback dispatched, ifname:%{public}s", ifname.c_str());
+    } else {
+        DHCP_LOGE("[DHCP][CallbackStub] failure callback dropped: target is null, ifname:%{public}s", ifname.c_str());
     }
 }
 

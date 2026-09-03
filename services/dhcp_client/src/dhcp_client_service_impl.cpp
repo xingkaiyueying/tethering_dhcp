@@ -208,12 +208,15 @@ ErrCode DhcpClientServiceImpl::RegisterDhcpClientCallBack(const std::string& ifn
     const sptr<IDhcpClientCallBack> &clientCallback)
 #endif
 {
+    DHCP_LOGI("[DHCP][ClientService] register callback begin, ifname:%{public}s", ifname.c_str());
     if (!DhcpPermissionUtils::VerifyIsNativeProcess()) {
-        DHCP_LOGE("RegisterDhcpClientCallBack:NOT NATIVE PROCESS, PERMISSION_DENIED!");
+        DHCP_LOGE("[DHCP][ClientService] register callback failed at native-process check, ifname:%{public}s",
+            ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     if (!DhcpPermissionUtils::VerifyDhcpNetworkPermission("ohos.permission.NETWORK_DHCP")) {
-        DHCP_LOGE("RegisterDhcpClientCallBack:VerifyDhcpNetworkPermission PERMISSION_DENIED!");
+        DHCP_LOGE("[DHCP][ClientService] register callback failed at NETWORK_DHCP check, ifname:%{public}s",
+            ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     std::lock_guard<std::mutex> autoLock(m_clientCallBackMutex);
@@ -224,7 +227,8 @@ ErrCode DhcpClientServiceImpl::RegisterDhcpClientCallBack(const std::string& ifn
     } else {
         uint32_t registerNum = m_mapClientCallBack.size();
         if (registerNum > MAX_REGISTER_CLIENT_NUM) {
-            DHCP_LOGI("RegisterDhcpClientCallBack, ifname:%{public}s register failed, num over limit", ifname.c_str());
+            DHCP_LOGE("[DHCP][ClientService] register callback failed: limit reached, ifname:%{public}s "
+                "count:%{public}u", ifname.c_str(), registerNum);
             return DHCP_E_FAILED;
         }
 #ifdef OHOS_ARCH_LITE
@@ -235,23 +239,27 @@ ErrCode DhcpClientServiceImpl::RegisterDhcpClientCallBack(const std::string& ifn
         m_mapClientCallBack.emplace(std::make_pair(ifname, mclientCallback));
         DHCP_LOGI("RegisterDhcpClientCallBack add ifname and mclientCallback, ifname:%{public}s", ifname.c_str());
     }
+    DHCP_LOGI("[DHCP][ClientService] register callback succeeded, ifname:%{public}s", ifname.c_str());
     return DHCP_E_SUCCESS;
 }
 
 ErrCode DhcpClientServiceImpl::StartDhcpClient(const RouterConfig &config)
 {
-    DHCP_LOGI("StartDhcpClient ifName:%{public}s bIpv6:%{public}d, isStaticIpv4:%{public}d", config.ifname.c_str(),
-        config.bIpv6, config.isStaticIpv4);
+    DHCP_LOGI("[DHCP][ClientService] start begin, ifname:%{public}s ipv4:%{public}d ipv6:%{public}d "
+        "static:%{public}d mode:%{public}u", config.ifname.c_str(), config.bIpv4, config.bIpv6,
+        config.isStaticIpv4, static_cast<uint8_t>(config.linkMode));
     if (!DhcpPermissionUtils::VerifyIsNativeProcess()) {
-        DHCP_LOGE("StartDhcpClient:NOT NATIVE PROCESS, PERMISSION_DENIED!");
+        DHCP_LOGE("[DHCP][ClientService] start failed at native-process check, ifname:%{public}s",
+            config.ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     if (!DhcpPermissionUtils::VerifyDhcpNetworkPermission("ohos.permission.NETWORK_DHCP")) {
-        DHCP_LOGE("StartDhcpClient:VerifyDhcpNetworkPermission PERMISSION_DENIED!");
+        DHCP_LOGE("[DHCP][ClientService] start failed at NETWORK_DHCP check, ifname:%{public}s",
+            config.ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     if (config.ifname.empty()) {
-        DHCP_LOGE("StartDhcpClient ifname is empty!");
+        DHCP_LOGE("[DHCP][ClientService] start failed: ifname is empty");
         return DHCP_E_FAILED;
     }
     RouterConfig innerCfg;
@@ -268,10 +276,16 @@ ErrCode DhcpClientServiceImpl::StartDhcpClient(const RouterConfig &config)
         std::lock_guard<std::mutex> autoLock(m_clientServiceMutex);
         auto iter = m_mapClientService.find(innerCfg.ifname);
         if (iter != m_mapClientService.end()) {
-            return StartOldClient(innerCfg, iter->second);
+            ErrCode ret = StartOldClient(innerCfg, iter->second);
+            DHCP_LOGI("[DHCP][ClientService] existing client start complete, ifname:%{public}s ret:%{public}d",
+                innerCfg.ifname.c_str(), static_cast<int32_t>(ret));
+            return ret;
         }
     }
-    return StartNewClient(innerCfg);
+    ErrCode ret = StartNewClient(innerCfg);
+    DHCP_LOGI("[DHCP][ClientService] new client start complete, ifname:%{public}s ret:%{public}d",
+        innerCfg.ifname.c_str(), static_cast<int32_t>(ret));
+    return ret;
 }
 
 ErrCode DhcpClientServiceImpl::DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)
@@ -335,7 +349,12 @@ ErrCode DhcpClientServiceImpl::StartOldClient(const RouterConfig &config, DhcpCl
         } else {
             dhcpClient.pStaStateMachine->SetConfiguration(config);
             if (!config.isStaticIpv4) {
-                dhcpClient.pStaStateMachine->StartIpv4Type(ifname, config.bIpv6, ACTION_START_OLD);
+                int startRet = dhcpClient.pStaStateMachine->StartIpv4Type(ifname, config.bIpv6, ACTION_START_OLD);
+                if (startRet != DHCP_OPT_SUCCESS) {
+                    DHCP_LOGE("[DHCP][ClientService] existing IPv4 state machine start failed, ifname:%{public}s "
+                        "ret:%{public}d", ifname.c_str(), startRet);
+                    return DHCP_E_FAILED;
+                }
             }
         }
     }
@@ -358,8 +377,17 @@ ErrCode DhcpClientServiceImpl::StartNewIpv4Client(const RouterConfig &config, Dh
     client.pStaStateMachine = pStaState;
     pStaState->SetConfiguration(config);
     if (!config.isStaticIpv4) {
-        pStaState->StartIpv4Type(ifname, config.bIpv6, ACTION_START_NEW);
+        int startRet = pStaState->StartIpv4Type(ifname, config.bIpv6, ACTION_START_NEW);
+        if (startRet != DHCP_OPT_SUCCESS) {
+            DHCP_LOGE("[DHCP][ClientService] new IPv4 state machine start failed, ifname:%{public}s ret:%{public}d",
+                ifname.c_str(), startRet);
+            delete pStaState;
+            client.pStaStateMachine = nullptr;
+            return DHCP_E_FAILED;
+        }
     }
+    DHCP_LOGI("[DHCP][ClientService] IPv4 state machine started, ifname:%{public}s mode:%{public}u", ifname.c_str(),
+        static_cast<uint8_t>(config.linkMode));
     return DHCP_E_SUCCESS;
 }
 
@@ -739,6 +767,7 @@ ErrCode DhcpClientServiceImpl::StopClientSa(void)
 int DhcpClientServiceImpl::DhcpIpv4ResultSuccess(struct DhcpIpResult &ipResult)
 {
     std::string ifname = ipResult.ifname;
+    DHCP_LOGI("[DHCP][ClientService] IPv4 success result received, ifname:%{public}s", ifname.c_str());
     OHOS::DHCP::DhcpResult result;
     result.iptype = 0;
     result.isOptSuc = true;
@@ -766,11 +795,11 @@ int DhcpClientServiceImpl::DhcpIpv4ResultSuccess(struct DhcpIpResult &ipResult)
     std::lock_guard<std::mutex> autoLock(m_clientCallBackMutex);
     auto iter = m_mapClientCallBack.find(ifname);
     if (iter == m_mapClientCallBack.end()) {
-        DHCP_LOGE("DhcpIpv4ResultSuccess m_mapClientCallBack not find callback!");
+        DHCP_LOGE("[DHCP][ClientService] success result exit: callback not found, ifname:%{public}s", ifname.c_str());
         return DHCP_OPT_FAILED;
     }
     if ((iter->second) == nullptr) {
-        DHCP_LOGE("DhcpIpv4ResultSuccess mclientCallback is nullptr!");
+        DHCP_LOGE("[DHCP][ClientService] success result exit: callback is null, ifname:%{public}s", ifname.c_str());
         return DHCP_OPT_FAILED;
     }
     if (CheckDhcpResultExist(ifname, result)) {
@@ -780,6 +809,7 @@ int DhcpClientServiceImpl::DhcpIpv4ResultSuccess(struct DhcpIpResult &ipResult)
     }
     PushDhcpResult(ifname, result);
     (iter->second)->OnIpSuccessChanged(DHCP_OPT_SUCCESS, ifname, result);
+    DHCP_LOGI("[DHCP][ClientService] IPv4 success callback dispatched, ifname:%{public}s", ifname.c_str());
     return DHCP_OPT_SUCCESS;
 }
 #ifndef OHOS_ARCH_LITE
@@ -827,7 +857,7 @@ int DhcpClientServiceImpl::DhcpIpv4ResultFail(struct DhcpIpResult &ipResult)
     result.uGetTime = (uint32_t)time(NULL);
     result.uAddTime = ipResult.uAddTime;
 
-    DHCP_LOGI("DhcpIpv4ResultFail ifname:%{public}s result.isOptSuc:false!", ifname.c_str());
+    DHCP_LOGE("[DHCP][ClientService] IPv4 failure result received, ifname:%{public}s", ifname.c_str());
     ActionMode action = ACTION_INVALID;
     {
         std::lock_guard<std::mutex> autoLock(m_clientServiceMutex);
@@ -839,11 +869,11 @@ int DhcpClientServiceImpl::DhcpIpv4ResultFail(struct DhcpIpResult &ipResult)
     std::lock_guard<std::mutex> autoLock(m_clientCallBackMutex);
     auto iter = m_mapClientCallBack.find(ifname);
     if (iter == m_mapClientCallBack.end()) {
-        DHCP_LOGE("DhcpIpv4ResultFail m_mapClientCallBack not find callback!");
+        DHCP_LOGE("[DHCP][ClientService] failure result exit: callback not found, ifname:%{public}s", ifname.c_str());
         return DHCP_OPT_FAILED;
     }
     if ((iter->second) == nullptr) {
-        DHCP_LOGE("DhcpIpv4ResultFail mclientCallback == nullptr!");
+        DHCP_LOGE("[DHCP][ClientService] failure result exit: callback is null, ifname:%{public}s", ifname.c_str());
         return DHCP_OPT_FAILED;
     }
     PushDhcpResult(ifname, result);
@@ -852,13 +882,14 @@ int DhcpClientServiceImpl::DhcpIpv4ResultFail(struct DhcpIpResult &ipResult)
     } else {
         (iter->second)->OnIpFailChanged(DHCP_OPT_FAILED, ifname.c_str(), "get dhcp ip result failed!");
     }
-    DHCP_LOGI("DhcpIpv4ResultFail OnIpFailChanged!, action:%{public}d", action);
+    DHCP_LOGI("[DHCP][ClientService] IPv4 failure callback dispatched, ifname:%{public}s action:%{public}d",
+        ifname.c_str(), action);
     return DHCP_OPT_SUCCESS;
 }
 
 int DhcpClientServiceImpl::DhcpIpv4ResultTimeOut(const std::string &ifname)
 {
-    DHCP_LOGI("DhcpIpv4ResultTimeOut ifname:%{public}s", ifname.c_str());
+    DHCP_LOGE("[DHCP][ClientService] IPv4 acquisition timed out, ifname:%{public}s", ifname.c_str());
     ActionMode action = ACTION_INVALID;
     {
         std::lock_guard<std::mutex> autoLock(m_clientServiceMutex);
