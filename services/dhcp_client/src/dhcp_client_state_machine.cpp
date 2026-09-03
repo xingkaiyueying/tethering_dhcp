@@ -17,6 +17,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <cerrno>
 #include <sys/types.h>
 #include <net/if.h>
@@ -254,6 +256,31 @@ int DhcpClientStateMachine::GetClientNetworkInfo(void)
         if (m_cltCnf.ifaceIndex == 0) {
             DHCP_LOGE("[DHCP][L3Tun] identity failed at if_nametoindex, ifname:%{public}s errno:%{public}d",
                 m_cltCnf.ifaceName, errno);
+            return DHCP_OPT_FAILED;
+        }
+        int socketFd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+        struct ifreq request = {};
+        if (socketFd < 0) {
+            DHCP_LOGE("[DHCP][L3Tun] identity failed at control socket, ifname:%{public}s errno:%{public}d",
+                m_cltCnf.ifaceName, errno);
+            return DHCP_OPT_FAILED;
+        }
+        if (strncpy_s(request.ifr_name, sizeof(request.ifr_name), m_cltCnf.ifaceName, IFNAMSIZ - 1) != EOK) {
+            close(socketFd);
+            DHCP_LOGE("[DHCP][L3Tun] identity failed while copying interface name, ifname:%{public}s",
+                m_cltCnf.ifaceName);
+            return DHCP_OPT_FAILED;
+        }
+        if (ioctl(socketFd, SIOCGIFFLAGS, &request) < 0) {
+            int error = errno;
+            close(socketFd);
+            DHCP_LOGE("[DHCP][L3Tun] identity failed while reading interface flags, ifname:%{public}s "
+                "errno:%{public}d", m_cltCnf.ifaceName, error);
+            return DHCP_OPT_FAILED;
+        }
+        close(socketFd);
+        if ((request.ifr_flags & IFF_UP) == 0) {
+            DHCP_LOGE("[DHCP][L3Tun] identity failed: interface is down, ifname:%{public}s", m_cltCnf.ifaceName);
             return DHCP_OPT_FAILED;
         }
         if (memcpy_s(m_cltCnf.ifaceMac, sizeof(m_cltCnf.ifaceMac), m_routerCfg.clientKey.data(),
