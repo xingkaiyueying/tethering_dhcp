@@ -4,12 +4,16 @@
  * you may not use this file except in compliance with the License.
  */
 #include <arpa/inet.h>
+#include <errno.h>
+#include <net/if.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include "dhcp_c_api.h"
@@ -54,6 +58,59 @@ static bool IsExpectedLease(const char *address)
     }
     uint32_t host = ntohl(parsed.s_addr);
     return host >= 0xC0A84D02 && host <= 0xC0A84D14;
+}
+
+static int SetInterfaceIpv4Value(int fd, const char *ifname, const char *value, unsigned long request,
+    const char *label)
+{
+    struct ifreq ifr = {0};
+    struct sockaddr_in address = {0};
+    if (value == NULL || snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0 ||
+        strlen(ifname) >= IFNAMSIZ) {
+        DHCP_LOG("interface %s failed: invalid iface=%s", label, ifname);
+        return -1;
+    }
+    address.sin_family = AF_INET;
+    if (inet_pton(AF_INET, value, &address.sin_addr) != 1) {
+        DHCP_LOG("interface %s failed: invalid IPv4 value=%s", label, value == NULL ? "-" : value);
+        return -1;
+    }
+    memcpy(&ifr.ifr_addr, &address, sizeof(address));
+    if (ioctl(fd, request, &ifr) < 0) {
+        int error = errno;
+        DHCP_LOG("interface %s ioctl failed iface=%s value=%s errno=%d", label, ifname, value, error);
+        return -error;
+    }
+    DHCP_LOG("interface %s applied iface=%s value=%s", label, ifname, value);
+    return 0;
+}
+
+static int ApplyLeaseToInterface(const char *ifname, const DhcpResult *result)
+{
+    if (ifname == NULL || result == NULL) {
+        DHCP_LOG("interface lease apply failed: missing iface or result");
+        return -1;
+    }
+    DHCP_LOG("interface lease apply begin iface=%s address=%s subnet=%s router=%s", ifname,
+        result->strOptClientId, result->strOptSubnet, result->strOptRouter1);
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        int error = errno;
+        DHCP_LOG("interface lease apply failed: socket errno=%d", error);
+        return -error;
+    }
+    int ret = SetInterfaceIpv4Value(fd, ifname, result->strOptClientId, SIOCSIFADDR, "address");
+    if (ret == 0) {
+        ret = SetInterfaceIpv4Value(fd, ifname, result->strOptSubnet, SIOCSIFNETMASK, "netmask");
+    }
+    close(fd);
+    if (ret != 0) {
+        DHCP_LOG("interface lease apply failed iface=%s ret=%d", ifname, ret);
+        return ret;
+    }
+    DHCP_LOG("interface lease apply complete iface=%s address=%s subnet=%s", ifname,
+        result->strOptClientId, result->strOptSubnet);
+    return 0;
 }
 
 static void OnIpSuccess(int status, const char *ifname, DhcpResult *result)
@@ -156,14 +213,18 @@ static int RunClientStart(const char *ifname, const char *keyText)
     for (int i = 0; ret == DHCP_SUCCESS && !atomic_load(&g_clientDone) && i < WAIT_SECONDS; ++i) {
         sleep(1);
     }
-    bool passed = ret == DHCP_SUCCESS && atomic_load(&g_clientPassed);
+    bool leasePassed = ret == DHCP_SUCCESS && atomic_load(&g_clientPassed);
+    int interfaceRet = leasePassed ? ApplyLeaseToInterface(ifname, &g_clientResult) : 0;
+    bool passed = leasePassed && interfaceRet == 0;
     if (ret == DHCP_SUCCESS && !atomic_load(&g_clientDone)) {
         DHCP_LOG("client lease wait timed out after %d seconds", WAIT_SECONDS);
     } else if (ret == DHCP_SUCCESS && !atomic_load(&g_clientPassed)) {
         DHCP_LOG("client callback completed but lease validation failed");
     }
-    printf("lease=%s\n", passed ? g_clientResult.strOptClientId : "-");
-    PrintResult(passed, passed ? "BOUND" : "REQUEST", passed ? 0 : (ret == DHCP_SUCCESS ? -1 : ret));
+    printf("lease=%s\n", leasePassed ? g_clientResult.strOptClientId : "-");
+    const char *phase = passed ? "BOUND" : (leasePassed ? "CONFIGURE" : "REQUEST");
+    int resultCode = passed ? 0 : (leasePassed ? interfaceRet : (ret == DHCP_SUCCESS ? -1 : ret));
+    PrintResult(passed, phase, resultCode);
     return passed ? 0 : 1;
 }
 
