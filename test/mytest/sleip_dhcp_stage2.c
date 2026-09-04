@@ -65,9 +65,9 @@ static int SetInterfaceIpv4Value(int fd, const char *ifname, const char *value, 
 {
     struct ifreq ifr = {0};
     struct sockaddr_in address = {0};
-    if (value == NULL || snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0 ||
+    if (ifname == NULL || value == NULL || snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0 ||
         strlen(ifname) >= IFNAMSIZ) {
-        DHCP_LOG("interface %s failed: invalid iface=%s", label, ifname);
+        DHCP_LOG("interface %s failed: invalid iface=%s", label, ifname == NULL ? "-" : ifname);
         return -1;
     }
     address.sin_family = AF_INET;
@@ -85,31 +85,85 @@ static int SetInterfaceIpv4Value(int fd, const char *ifname, const char *value, 
     return 0;
 }
 
-static int ApplyLeaseToInterface(const char *ifname, const DhcpResult *result)
+static int SetInterfaceUp(int fd, const char *ifname)
 {
-    if (ifname == NULL || result == NULL) {
-        DHCP_LOG("interface lease apply failed: missing iface or result");
+    struct ifreq ifr = {0};
+    if (ifname == NULL || strlen(ifname) >= IFNAMSIZ ||
+        snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0) {
+        DHCP_LOG("interface up failed: invalid iface");
         return -1;
     }
-    DHCP_LOG("interface lease apply begin iface=%s address=%s subnet=%s router=%s", ifname,
-        result->strOptClientId, result->strOptSubnet, result->strOptRouter1);
+    if (ioctl(fd, SIOCGIFFLAGS, &ifr) < 0) {
+        int error = errno;
+        DHCP_LOG("interface flags read failed iface=%s errno=%d", ifname, error);
+        return -error;
+    }
+    if ((ifr.ifr_flags & IFF_UP) != 0) {
+        DHCP_LOG("interface already up iface=%s", ifname);
+        return 0;
+    }
+    ifr.ifr_flags |= IFF_UP;
+    if (ioctl(fd, SIOCSIFFLAGS, &ifr) < 0) {
+        int error = errno;
+        DHCP_LOG("interface up ioctl failed iface=%s errno=%d", ifname, error);
+        return -error;
+    }
+    DHCP_LOG("interface up applied iface=%s", ifname);
+    return 0;
+}
+
+static int ConfigureServerInterface(const char *ifname, const char *address, const char *subnet)
+{
+    DHCP_LOG("server interface configure begin iface=%s address=%s subnet=%s", ifname, address, subnet);
     int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0) {
         int error = errno;
-        DHCP_LOG("interface lease apply failed: socket errno=%d", error);
+        DHCP_LOG("server interface configure failed: socket errno=%d", error);
         return -error;
     }
-    int ret = SetInterfaceIpv4Value(fd, ifname, result->strOptClientId, SIOCSIFADDR, "address");
+    int ret = SetInterfaceIpv4Value(fd, ifname, address, SIOCSIFADDR, "address");
     if (ret == 0) {
-        ret = SetInterfaceIpv4Value(fd, ifname, result->strOptSubnet, SIOCSIFNETMASK, "netmask");
+        ret = SetInterfaceIpv4Value(fd, ifname, subnet, SIOCSIFNETMASK, "netmask");
+    }
+    if (ret == 0) {
+        ret = SetInterfaceUp(fd, ifname);
     }
     close(fd);
     if (ret != 0) {
-        DHCP_LOG("interface lease apply failed iface=%s ret=%d", ifname, ret);
+        DHCP_LOG("server interface configure failed iface=%s ret=%d", ifname, ret);
         return ret;
     }
-    DHCP_LOG("interface lease apply complete iface=%s address=%s subnet=%s", ifname,
-        result->strOptClientId, result->strOptSubnet);
+    DHCP_LOG("server interface configure complete iface=%s address=%s subnet=%s", ifname, address, subnet);
+    return 0;
+}
+
+static int DeriveServerAddress(const char *start, const char *end, const char *subnet, char address[INET_ADDRSTRLEN])
+{
+    struct in_addr startAddr;
+    struct in_addr endAddr;
+    struct in_addr maskAddr;
+    if (inet_pton(AF_INET, start, &startAddr) != 1 || inet_pton(AF_INET, end, &endAddr) != 1 ||
+        inet_pton(AF_INET, subnet, &maskAddr) != 1) {
+        DHCP_LOG("server address derivation failed: invalid range or subnet");
+        return -1;
+    }
+    uint32_t startHost = ntohl(startAddr.s_addr);
+    uint32_t endHost = ntohl(endAddr.s_addr);
+    uint32_t maskHost = ntohl(maskAddr.s_addr);
+    uint32_t network = startHost & maskHost;
+    uint32_t broadcast = network | ~maskHost;
+    uint32_t gateway = network + 1;
+    if ((endHost & maskHost) != network || startHost > endHost || gateway >= broadcast ||
+        (gateway >= startHost && gateway <= endHost)) {
+        DHCP_LOG("server address derivation failed: range must leave subnet first host for gateway");
+        return -1;
+    }
+    struct in_addr gatewayAddr = {.s_addr = htonl(gateway)};
+    if (inet_ntop(AF_INET, &gatewayAddr, address, INET_ADDRSTRLEN) == NULL) {
+        DHCP_LOG("server address derivation failed: inet_ntop errno=%d", errno);
+        return -1;
+    }
+    DHCP_LOG("server address derived address=%s subnet=%s", address, subnet);
     return 0;
 }
 
@@ -174,6 +228,16 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
     snprintf(range.strStartip, sizeof(range.strStartip), "%s", start);
     snprintf(range.strEndip, sizeof(range.strEndip), "%s", end);
     snprintf(range.strSubnet, sizeof(range.strSubnet), "255.255.255.0");
+    char serverAddress[INET_ADDRSTRLEN] = {0};
+    int configRet = DeriveServerAddress(start, end, range.strSubnet, serverAddress);
+    if (configRet == 0) {
+        configRet = ConfigureServerInterface(ifname, serverAddress, range.strSubnet);
+    }
+    if (configRet != 0) {
+        DHCP_LOG("server flow exit before range: interface configure failed ret=%d", configRet);
+        PrintResult(false, "CONFIGURE", configRet);
+        return 1;
+    }
     DhcpErrorCode ret = SetDhcpRange(ifname, &range);
     DHCP_LOG("server range configured iface=%s ret=%d", ifname, ret);
     if (ret == DHCP_SUCCESS) {
@@ -213,18 +277,14 @@ static int RunClientStart(const char *ifname, const char *keyText)
     for (int i = 0; ret == DHCP_SUCCESS && !atomic_load(&g_clientDone) && i < WAIT_SECONDS; ++i) {
         sleep(1);
     }
-    bool leasePassed = ret == DHCP_SUCCESS && atomic_load(&g_clientPassed);
-    int interfaceRet = leasePassed ? ApplyLeaseToInterface(ifname, &g_clientResult) : 0;
-    bool passed = leasePassed && interfaceRet == 0;
+    bool passed = ret == DHCP_SUCCESS && atomic_load(&g_clientPassed);
     if (ret == DHCP_SUCCESS && !atomic_load(&g_clientDone)) {
         DHCP_LOG("client lease wait timed out after %d seconds", WAIT_SECONDS);
     } else if (ret == DHCP_SUCCESS && !atomic_load(&g_clientPassed)) {
         DHCP_LOG("client callback completed but lease validation failed");
     }
-    printf("lease=%s\n", leasePassed ? g_clientResult.strOptClientId : "-");
-    const char *phase = passed ? "BOUND" : (leasePassed ? "CONFIGURE" : "REQUEST");
-    int resultCode = passed ? 0 : (leasePassed ? interfaceRet : (ret == DHCP_SUCCESS ? -1 : ret));
-    PrintResult(passed, phase, resultCode);
+    printf("lease=%s\n", passed ? g_clientResult.strOptClientId : "-");
+    PrintResult(passed, passed ? "BOUND" : "REQUEST", passed ? 0 : (ret == DHCP_SUCCESS ? -1 : ret));
     return passed ? 0 : 1;
 }
 
