@@ -128,9 +128,11 @@ DhcpErrorCode DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)
 NO_SANITIZE("cfi") DhcpErrorCode StopDhcpClient(const char *ifname, bool bIpv6, bool bIpv4)
 {
     CHECK_PTR_RETURN(ifname, DHCP_INVALID_PARAM);
+    if (dhcpClientPtr == nullptr) {
+        dhcpClientPtr = OHOS::DHCP::DhcpClient::GetInstance(DHCP_CLIENT_ABILITY_ID);
+    }
     CHECK_PTR_RETURN(dhcpClientPtr, DHCP_INVALID_PARAM);
-    CHECK_PTR_RETURN(dhcpClientCallBack, DHCP_INVALID_PARAM);
-    if (bIpv4) {
+    if (bIpv4 && dhcpClientCallBack != nullptr) {
         dhcpClientCallBack->UnRegisterCallBack(ifname);
     }
     return  GetCErrorCode(dhcpClientPtr->StopDhcpClient(ifname, bIpv6, bIpv4));
