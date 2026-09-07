@@ -45,7 +45,11 @@ extern "C" {
      * @param config - config
      * @Return : success - DHCP_SUCCESS, failed - others.
      */
+#ifdef __cplusplus
     DhcpErrorCode StartDhcpClient(const RouterConfig &config);
+#else
+    DhcpErrorCode StartDhcpClient(const RouterConfig *config);
+#endif
 
     /**
      * @Description : add dhcp cache
@@ -53,7 +57,11 @@ extern "C" {
      * @param ipCacheInfo - ip Cache Infomation
      * @Return : success - DHCP_SUCCESS, failed - others.
      */
+#ifdef __cplusplus
     DhcpErrorCode DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo);
+#else
+    DhcpErrorCode DealWifiDhcpCache(int32_t cmd, const IpCacheInfo *ipCacheInfo);
+#endif
 
     /**
      * @Description : Stop dhcp client service of specified interface.
@@ -62,7 +70,11 @@ extern "C" {
      * @param bIpv6 - can or not get ipv6 [in]
      * @Return : success - DHCP_SUCCESS, failed - others.
      */
+#ifdef __cplusplus
     DhcpErrorCode StopDhcpClient(const char *ifname, bool bIpv6, bool bIpv4 = true);
+#else
+    DhcpErrorCode StopDhcpClient(const char *ifname, bool bIpv6, bool bIpv4);
+#endif
 
     DhcpErrorCode RegisterDhcpServerCallBack(const char *ifname, const ServerCallBack *event);
     DhcpErrorCode StartDhcpServer(const char *ifname);

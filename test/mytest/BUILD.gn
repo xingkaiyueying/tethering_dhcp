@@ -1,0 +1,27 @@
+import("//build/ohos.gni")
+
+ohos_executable("sleip_dhcp_stage2") {
+  sanitize = {
+    cfi = true  # Enable/disable control flow integrity detection
+    boundary_sanitize = true  # Enable boundary san detection
+    cfi_cross_dso = true  # Cross-SO CFI Checks
+    integer_overflow = true  # Enable integer overflow detection
+    ubsan = true  # Enable some Ubsan options
+    cfi_vcall_icall_only = true
+    debug = false
+  }
+  sources = [
+    "sleip_dhcp_stage2.c",
+    "sleip_dhcp_stage2_token.cpp",
+  ]
+  include_dirs = [ "../../interfaces/kits/c" ]
+  deps = [ "//foundation/communication/dhcp/frameworks/native:dhcp_sdk" ]
+  external_deps = [
+    "access_token:libaccesstoken_sdk",
+    "access_token:libnativetoken",
+    "access_token:libtoken_setproc",
+  ]
+  subsystem_name = "communication"
+  part_name = "dhcp"
+  install_enable = true
+}

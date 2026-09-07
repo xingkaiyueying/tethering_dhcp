@@ -12,6 +12,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <algorithm>
+#include <vector>
+
 #include "dhcp_client_callback_proxy.h"
 #include "dhcp_client_stub.h"
 #include "dhcp_logger.h"
@@ -119,7 +122,8 @@ int DhcpClientStub::OnRemoteRequest(uint32_t code, MessageParcel &data, MessageP
 
 int DhcpClientStub::OnRegisterCallBack(uint32_t code, MessageParcel &data, MessageParcel &reply, MessageOption &option)
 {
-    DHCP_LOGI("run %{public}s code %{public}u, datasize %{public}zu", __func__, code, data.GetRawDataSize());
+    DHCP_LOGI("[DHCP][ClientStub] register callback request, code:%{public}u datasize:%{public}zu", code,
+        data.GetRawDataSize());
     sptr<IRemoteObject> remote = data.ReadRemoteObject();
     if (remote == nullptr) {
         DHCP_LOGE("Failed to ReadRemoteObject!");
@@ -149,6 +153,12 @@ int DhcpClientStub::OnRegisterCallBack(uint32_t code, MessageParcel &data, Messa
         }
     }
     ErrCode ret = RegisterDhcpClientCallBack(ifName, callback_);
+    if (ret != DHCP_E_SUCCESS) {
+        DHCP_LOGE("[DHCP][ClientStub] register callback rejected, ifname:%{public}s ret:%{public}d", ifName.c_str(),
+            static_cast<int32_t>(ret));
+    } else {
+        DHCP_LOGI("[DHCP][ClientStub] register callback succeeded, ifname:%{public}s", ifName.c_str());
+    }
     reply.WriteInt32(0);
     reply.WriteInt32(ret);
     return 0;
@@ -156,7 +166,8 @@ int DhcpClientStub::OnRegisterCallBack(uint32_t code, MessageParcel &data, Messa
 
 int DhcpClientStub::OnStartDhcpClient(uint32_t code, MessageParcel &data, MessageParcel &reply, MessageOption &option)
 {
-    DHCP_LOGI("run %{public}s code %{public}u, datasize %{public}zu", __func__, code, data.GetRawDataSize());
+    DHCP_LOGI("[DHCP][ClientStub] start request, code:%{public}u datasize:%{public}zu", code,
+        data.GetRawDataSize());
     RouterConfig config;
     config.ifname = data.ReadString();
     config.bssid = data.ReadString();
@@ -165,7 +176,26 @@ int DhcpClientStub::OnStartDhcpClient(uint32_t code, MessageParcel &data, Messag
     config.bSpecificNetwork = data.ReadBool();
     config.isStaticIpv4 = data.ReadBool();
     config.bIpv4 = data.ReadBool();
+    uint8_t linkMode = data.ReadUint8();
+    std::vector<uint8_t> clientKey;
+    if (linkMode > static_cast<uint8_t>(DhcpLinkMode::L3_TUN) || !data.ReadUInt8Vector(&clientKey) ||
+        clientKey.size() != config.clientKey.size()) {
+        DHCP_LOGE("[DHCP][ClientStub] start rejected: invalid mode or client key, ifname:%{public}s mode:%{public}u "
+            "keySize:%{public}zu", config.ifname.c_str(), linkMode, clientKey.size());
+        reply.WriteInt32(0);
+        reply.WriteInt32(DHCP_E_INVALID_PARAM);
+        return 0;
+    }
+    config.linkMode = static_cast<DhcpLinkMode>(linkMode);
+    std::copy(clientKey.begin(), clientKey.end(), config.clientKey.begin());
     ErrCode ret = StartDhcpClient(config);
+    if (ret != DHCP_E_SUCCESS) {
+        DHCP_LOGE("[DHCP][ClientStub] start rejected, ifname:%{public}s mode:%{public}u ret:%{public}d",
+            config.ifname.c_str(), linkMode, static_cast<int32_t>(ret));
+    } else {
+        DHCP_LOGI("[DHCP][ClientStub] start accepted, ifname:%{public}s mode:%{public}u", config.ifname.c_str(),
+            linkMode);
+    }
     reply.WriteInt32(0);
     reply.WriteInt32(ret);
     return 0;

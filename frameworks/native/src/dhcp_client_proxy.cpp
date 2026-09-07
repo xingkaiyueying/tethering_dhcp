@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 #include <unistd.h>
+#include <vector>
 #include "dhcp_client_proxy.h"
 #include "dhcp_manager_service_ipc_interface_code.h"
 #include "dhcp_client_callback_stub.h"
@@ -96,26 +97,27 @@ bool DhcpClientProxy::IsRemoteDied(void)
 ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
     const sptr<IDhcpClientCallBack> &callback)
 {
+    DHCP_LOGI("[DHCP][ClientProxy] register callback begin, ifname:%{public}s", ifname.c_str());
     if (mRemoteDied) {
-        DHCP_LOGE("failed to `%{public}s`,remote service is died!", __func__);
+        DHCP_LOGE("[DHCP][ClientProxy] register callback failed: remote service died");
         return DHCP_E_FAILED;
     }
     MessageOption option;
     MessageParcel data, reply;
     if (!data.WriteInterfaceToken(GetDescriptor())) {
-        DHCP_LOGE("Write interface token error: %{public}s", __func__);
+        DHCP_LOGE("[DHCP][ClientProxy] register callback failed: write interface token");
         return DHCP_E_FAILED;
     }
     data.WriteInt32(0);
 
     if (g_dhcpClientCallBackStub == nullptr) {
-        DHCP_LOGE("g_dhcpClientCallBackStub is nullptr");
+        DHCP_LOGE("[DHCP][ClientProxy] register callback failed: callback stub is null");
         return DHCP_E_FAILED;
     }
     g_dhcpClientCallBackStub->RegisterCallBack(callback);
 
     if (!data.WriteRemoteObject(g_dhcpClientCallBackStub->AsObject())) {
-        DHCP_LOGE("WriteRemoteObject failed!");
+        DHCP_LOGE("[DHCP][ClientProxy] register callback failed: write remote callback");
         return DHCP_E_FAILED;
     }
 
@@ -124,31 +126,38 @@ ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
     int error = Remote()->SendRequest(static_cast<uint32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_REG_CALL_BACK),
         data, reply, option);
     if (error != ERR_NONE) {
-        DHCP_LOGE("Set Attr(%{public}d) failed, code is %{public}d",
+        DHCP_LOGE("[DHCP][ClientProxy] register callback transport failed, command:%{public}d code:%{public}d",
             static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_REG_CALL_BACK), error);
         return DHCP_E_FAILED;
     }
     int exception = reply.ReadInt32();
     if (exception) {
-        DHCP_LOGE("exception failed, exception:%{public}d", exception);
+        DHCP_LOGE("[DHCP][ClientProxy] register callback IPC exception:%{public}d", exception);
         return DHCP_E_FAILED;
     }
-    DHCP_LOGI("RegisterDhcpClientCallBack ok, exception:%{public}d", exception);
-    return DHCP_E_SUCCESS;
+    ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
+    if (ret != DHCP_E_SUCCESS) {
+        DHCP_LOGE("[DHCP][ClientProxy] register callback service failed, ret:%{public}d",
+            static_cast<int32_t>(ret));
+        return ret;
+    }
+    DHCP_LOGI("[DHCP][ClientProxy] register callback succeeded, ifname:%{public}s", ifname.c_str());
+    return ret;
 }
 
 ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
 {
-    DHCP_LOGI("DhcpClientProxy enter StartDhcpClient mRemoteDied:%{public}d", mRemoteDied);
+    DHCP_LOGI("[DHCP][ClientProxy] start begin, ifname:%{public}s mode:%{public}u remoteDied:%{public}d",
+        config.ifname.c_str(), static_cast<uint8_t>(config.linkMode), mRemoteDied);
     if (mRemoteDied) {
-        DHCP_LOGE("failed to `%{public}s`,remote service is died!", __func__);
+        DHCP_LOGE("[DHCP][ClientProxy] start failed: remote service died");
         return DHCP_E_FAILED;
     }
 
     MessageOption option;
     MessageParcel data, reply;
     if (!data.WriteInterfaceToken(GetDescriptor())) {
-        DHCP_LOGE("Write interface token error: %{public}s", __func__);
+        DHCP_LOGE("[DHCP][ClientProxy] start failed: write interface token");
         return DHCP_E_FAILED;
     }
     data.WriteInt32(0);
@@ -159,23 +168,31 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
     data.WriteBool(config.bSpecificNetwork);
     data.WriteBool(config.isStaticIpv4);
     data.WriteBool(config.bIpv4);
+    data.WriteUint8(static_cast<uint8_t>(config.linkMode));
+    data.WriteUInt8Vector(std::vector<uint8_t>(config.clientKey.begin(), config.clientKey.end()));
     DHCP_LOGI("%{public}s, calling uid:%{public}d, ifname:%{public}s, prohibitUseCacheIp:%{public}d, bIpv6:%{public}d"\
         "bSpecificNetwork:%{public}d", __func__, GetCallingUid(), config.ifname.c_str(), config.prohibitUseCacheIp,
         config.bIpv6, config.bSpecificNetwork);
     int error = Remote()->SendRequest(
         static_cast<uint32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT), data, reply, option);
     if (error != ERR_NONE) {
-        DHCP_LOGE("Set Attr(%{public}d) failed, code is %{public}d",
+        DHCP_LOGE("[DHCP][ClientProxy] start transport failed, command:%{public}d code:%{public}d",
             static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT), error);
         return DHCP_E_FAILED;
     }
     int exception = reply.ReadInt32();
     if (exception) {
-        DHCP_LOGE("exception failed, exception:%{public}d", exception);
+        DHCP_LOGE("[DHCP][ClientProxy] start IPC exception:%{public}d", exception);
         return DHCP_E_FAILED;
     }
-    DHCP_LOGI("StartDhcpClient ok, exception:%{public}d", exception);
-    return DHCP_E_SUCCESS;
+    ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
+    if (ret != DHCP_E_SUCCESS) {
+        DHCP_LOGE("[DHCP][ClientProxy] start service failed, ifname:%{public}s ret:%{public}d",
+            config.ifname.c_str(), static_cast<int32_t>(ret));
+    } else {
+        DHCP_LOGI("[DHCP][ClientProxy] start accepted, ifname:%{public}s", config.ifname.c_str());
+    }
+    return ret;
 }
 
 ErrCode DhcpClientProxy::DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)

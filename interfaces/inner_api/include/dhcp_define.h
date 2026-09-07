@@ -16,6 +16,7 @@
 #ifndef OHOS_DHCP_DEFINE_H
 #define OHOS_DHCP_DEFINE_H
 
+#include <array>
 #include <string>
 #include <map>
 #include <cstdint>
@@ -363,6 +364,11 @@ struct DhcpRange {
     }
 };
 
+enum class DhcpLinkMode : uint8_t {
+    L2_PACKET = 0,
+    L3_TUN = 1,
+};
+
 struct RouterConfig {
     std::string ifname;
     std::string bssid;
@@ -371,6 +377,8 @@ struct RouterConfig {
     bool bSpecificNetwork { false };
     bool isStaticIpv4 { false };
     bool bIpv4 { true };
+    DhcpLinkMode linkMode { DhcpLinkMode::L2_PACKET };
+    std::array<uint8_t, ETH_MAC_ADDR_LEN> clientKey {};
 };
 
 struct IpCacheInfo {

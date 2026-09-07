@@ -15,6 +15,9 @@
 #ifndef OHOS_DHCP_RESULT_EVENT_H
 #define OHOS_DHCP_RESULT_EVENT_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <netinet/ip.h>
 #include <sys/stat.h>
 
@@ -33,6 +36,12 @@ extern "C" {
 #define DHCP_DNS_MAX_NUMBER 10
 #define DHCP_DNS_DATA_MAX_LEN 128
 #define DHCP_ADDR_MAX_NUMBER 16
+#define DHCP_CLIENT_KEY_LEN 6
+
+typedef enum DhcpLinkMode {
+    DHCP_LINK_MODE_L2_PACKET = 0,
+    DHCP_LINK_MODE_L3_TUN = 1,
+} DhcpLinkMode;
 #define DHCP_ADDR_DATA_MAX_LEN 128
 #define INTERFACE_MAX_LEN 32
 #define SSID_MAX_LEN 32
@@ -114,11 +123,23 @@ typedef struct {
 typedef struct RouterConfig {
     char ifname[INTERFACE_MAX_LEN];
     char bssid[MAC_ADDR_MAX_LEN];
+#ifdef __cplusplus
     bool prohibitUseCacheIp { false };
     bool bIpv6 { true };
     bool bSpecificNetwork { false };
     bool isStaticIpv4 { false };
     bool bIpv4 { true };
+    uint8_t linkMode { DHCP_LINK_MODE_L2_PACKET };
+    uint8_t clientKey[DHCP_CLIENT_KEY_LEN] { 0 };
+#else
+    bool prohibitUseCacheIp;
+    bool bIpv6;
+    bool bSpecificNetwork;
+    bool isStaticIpv4;
+    bool bIpv4;
+    uint8_t linkMode;
+    uint8_t clientKey[DHCP_CLIENT_KEY_LEN];
+#endif
 }RouterConfig;
 
 typedef struct IpCacheInfo {

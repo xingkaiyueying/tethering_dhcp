@@ -146,7 +146,8 @@ ErrCode DhcpServerProxy::RegisterDhcpServerCallBack(const std::string& ifname,
 
 ErrCode DhcpServerProxy::StartDhcpServer(const std::string& ifname)
 {
-    DHCP_LOGI("DhcpServerProxy enter StartDhcpServer mRemoteDied:%{public}d", mRemoteDied);
+    DHCP_LOGI("[DHCP][ServerProxy] start begin, ifname:%{public}s remoteDied:%{public}d", ifname.c_str(),
+        mRemoteDied);
     if (mRemoteDied) {
         DHCP_LOGE("failed to `%{public}s`,remote service is died!", __func__);
         return DHCP_E_FAILED;
@@ -178,13 +179,20 @@ ErrCode DhcpServerProxy::StartDhcpServer(const std::string& ifname)
         DHCP_LOGE("exception failed, exception:%{public}d", exception);
         return DHCP_E_FAILED;
     }
-    DHCP_LOGI("DhcpServerProxy StartDhcpServer ok, exception:%{public}d", exception);
-    return DHCP_E_SUCCESS;
+    ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
+    if (ret != DHCP_E_SUCCESS) {
+        DHCP_LOGE("[DHCP][ServerProxy] start service failed, ifname:%{public}s ret:%{public}d", ifname.c_str(),
+            static_cast<int32_t>(ret));
+    } else {
+        DHCP_LOGI("[DHCP][ServerProxy] start succeeded, ifname:%{public}s", ifname.c_str());
+    }
+    return ret;
 }
 
 ErrCode DhcpServerProxy::SetDhcpRange(const std::string& ifname, const DhcpRange& range)
 {
-    DHCP_LOGI("DhcpServerProxy enter SetDhcpRange mRemoteDied:%{public}d", mRemoteDied);
+    DHCP_LOGI("[DHCP][ServerProxy] set range begin, ifname:%{public}s remoteDied:%{public}d", ifname.c_str(),
+        mRemoteDied);
     if (mRemoteDied) {
         DHCP_LOGE("failed to `%{public}s`,remote service is died!", __func__);
         return DHCP_E_FAILED;
@@ -220,8 +228,14 @@ ErrCode DhcpServerProxy::SetDhcpRange(const std::string& ifname, const DhcpRange
         DHCP_LOGE("exception failed, exception:%{public}d", exception);
         return DHCP_E_FAILED;
     }
-    DHCP_LOGI("DhcpServerProxy SetDhcpRange ok, exception:%{public}d", exception);
-    return DHCP_E_SUCCESS;
+    ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
+    if (ret != DHCP_E_SUCCESS) {
+        DHCP_LOGE("[DHCP][ServerProxy] set range service failed, ifname:%{public}s ret:%{public}d", ifname.c_str(),
+            static_cast<int32_t>(ret));
+    } else {
+        DHCP_LOGI("[DHCP][ServerProxy] set range succeeded, ifname:%{public}s", ifname.c_str());
+    }
+    return ret;
 }
 
 ErrCode DhcpServerProxy::SetDhcpName(const std::string& ifname, const std::string& tagName)

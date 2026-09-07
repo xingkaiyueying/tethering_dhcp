@@ -100,7 +100,8 @@ void DhcpClientCallBack::ResultInfoCopyExt(DhcpResult &dhcpResult, OHOS::DHCP::D
 void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifname, OHOS::DHCP::DhcpResult& result)
     __attribute__((no_sanitize("cfi")))
 {
-    DHCP_LOGI("OnIpSuccessChanged status:%{public}d,ifname:%{public}s", status, ifname.c_str());
+    DHCP_LOGI("[DHCP][CAdapter] success callback received, ifname:%{public}s status:%{public}d",
+        ifname.c_str(), status);
     DhcpResult dhcpResult;
     dhcpResult.iptype = result.iptype;
     dhcpResult.isOptSuc = result.isOptSuc;
@@ -119,25 +120,29 @@ void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifnam
     auto iter = mapClientCallBack.find(ifname);
     if ((iter != mapClientCallBack.end()) && (iter->second != nullptr) &&
         (iter->second->OnIpSuccessChanged != nullptr)) {
-        DHCP_LOGI("OnIpSuccessChanged callbackEvent status:%{public}d", status);
+        DHCP_LOGI("[DHCP][CAdapter] dispatch success callback, ifname:%{public}s status:%{public}d",
+            ifname.c_str(), status);
         iter->second->OnIpSuccessChanged(status, ifname.c_str(), &dhcpResult);
     } else {
-        DHCP_LOGE("OnIpSuccessChanged callbackEvent failed!");
+        DHCP_LOGE("[DHCP][CAdapter] success callback dispatch failed: handler not found, ifname:%{public}s",
+            ifname.c_str());
     }
 }
 
 void DhcpClientCallBack::OnIpFailChanged(int status, const std::string& ifname, const std::string& reason)
     __attribute__((no_sanitize("cfi")))
 {
-    DHCP_LOGI("OnIpFailChanged status:%{public}d, ifname:%{public}s, reason:%{public}s", status, ifname.c_str(),
-        reason.c_str());
+    DHCP_LOGI("[DHCP][CAdapter] failure callback received, ifname:%{public}s status:%{public}d reason:%{public}s",
+        ifname.c_str(), status, reason.c_str());
     std::lock_guard<std::mutex> autoLock(callBackMutex);
     auto iter = mapClientCallBack.find(ifname);
     if ((iter != mapClientCallBack.end()) && (iter->second != nullptr) && (iter->second->OnIpFailChanged != nullptr)) {
-        DHCP_LOGI("OnIpFailChanged callbackEvent status:%{public}d", status);
+        DHCP_LOGI("[DHCP][CAdapter] dispatch failure callback, ifname:%{public}s status:%{public}d",
+            ifname.c_str(), status);
         iter->second->OnIpFailChanged(status, ifname.c_str(), reason.c_str());
     } else {
-        DHCP_LOGE("OnIpFailChanged callbackEvent failed!");
+        DHCP_LOGE("[DHCP][CAdapter] failure callback dispatch failed: handler not found, ifname:%{public}s",
+            ifname.c_str());
     }
 }
 #ifndef OHOS_ARCH_LITE
