@@ -51,6 +51,9 @@ extern "C" {
     DhcpErrorCode StartDhcpClient(const RouterConfig *config);
 #endif
 
+    /* Private L3 TUN entry; RouterConfig and StartDhcpClient retain their original L2 ABI. */
+    DhcpErrorCode StartDhcpClientL3(const RouterConfig *config, const uint8_t *clientKey, uint32_t keyLength);
+
     /**
      * @Description : add dhcp cache
      *

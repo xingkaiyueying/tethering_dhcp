@@ -12,6 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <algorithm>
 #include "kits/c/dhcp_c_api.h"
 #include "inner_api/dhcp_client.h"
 #include "inner_api/dhcp_server.h"
@@ -87,13 +88,13 @@ DhcpErrorCode RegisterDhcpClientReportCallBack(const char *ifname, const DhcpCli
     return DHCP_SUCCESS;
 }
 
-NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
+static DhcpErrorCode StartDhcpClientWithMode(const RouterConfig &config, const uint8_t *clientKey)
 {
     if (dhcpClientPtr == nullptr) {
         DHCP_LOGE("[DHCP][CAdapter] start failed: callback must be registered first");
         return DHCP_INVALID_PARAM;
     }
-    DHCP_LOGI("[DHCP][CAdapter] start begin, ifname:%{public}s mode:%{public}u", config.ifname, config.linkMode);
+    DHCP_LOGI("[DHCP][CAdapter] start begin, ifname:%{public}s mode:%{public}u", config.ifname, clientKey == nullptr ? 0 : 1);
     OHOS::DHCP::RouterConfig routerConfig;
     routerConfig.ifname = config.ifname;
     routerConfig.bssid = config.bssid;
@@ -102,9 +103,10 @@ NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
     routerConfig.bSpecificNetwork = config.bSpecificNetwork;
     routerConfig.isStaticIpv4 = config.isStaticIpv4;
     routerConfig.bIpv4 = config.bIpv4;
-    routerConfig.linkMode = static_cast<OHOS::DHCP::DhcpLinkMode>(config.linkMode);
-    routerConfig.clientKey = { config.clientKey[0], config.clientKey[1], config.clientKey[2],
-        config.clientKey[3], config.clientKey[4], config.clientKey[5] };
+    if (clientKey != nullptr) {
+        routerConfig.linkMode = OHOS::DHCP::DhcpLinkMode::L3_TUN;
+        std::copy(clientKey, clientKey + DHCP_CLIENT_KEY_LEN, routerConfig.clientKey.begin());
+    }
     DhcpErrorCode ret = GetCErrorCode(dhcpClientPtr->StartDhcpClient(routerConfig));
     if (ret != DHCP_SUCCESS) {
         DHCP_LOGE("[DHCP][CAdapter] start failed, ifname:%{public}s ret:%{public}d", config.ifname, ret);
@@ -112,6 +114,20 @@ NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
         DHCP_LOGI("[DHCP][CAdapter] start accepted, ifname:%{public}s", config.ifname);
     }
     return ret;
+}
+
+NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
+{
+    return StartDhcpClientWithMode(config, nullptr);
+}
+
+NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClientL3(const RouterConfig *config,
+    const uint8_t *clientKey, uint32_t keyLength)
+{
+    if (config == nullptr || clientKey == nullptr || keyLength != DHCP_CLIENT_KEY_LEN) {
+        return DHCP_INVALID_PARAM;
+    }
+    return StartDhcpClientWithMode(*config, clientKey);
 }
 
 DhcpErrorCode DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)

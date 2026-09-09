@@ -169,25 +169,28 @@ int DhcpClientStub::OnStartDhcpClient(uint32_t code, MessageParcel &data, Messag
     DHCP_LOGI("[DHCP][ClientStub] start request, code:%{public}u datasize:%{public}zu", code,
         data.GetRawDataSize());
     RouterConfig config;
-    config.ifname = data.ReadString();
-    config.bssid = data.ReadString();
-    config.prohibitUseCacheIp = data.ReadBool();
-    config.bIpv6 = data.ReadBool();
-    config.bSpecificNetwork = data.ReadBool();
-    config.isStaticIpv4 = data.ReadBool();
-    config.bIpv4 = data.ReadBool();
-    uint8_t linkMode = data.ReadUint8();
-    std::vector<uint8_t> clientKey;
-    if (linkMode > static_cast<uint8_t>(DhcpLinkMode::L3_TUN) || !data.ReadUInt8Vector(&clientKey) ||
-        clientKey.size() != config.clientKey.size()) {
-        DHCP_LOGE("[DHCP][ClientStub] start rejected: invalid mode or client key, ifname:%{public}s mode:%{public}u "
-            "keySize:%{public}zu", config.ifname.c_str(), linkMode, clientKey.size());
+    if (!data.ReadString(config.ifname) || !data.ReadString(config.bssid) ||
+        !data.ReadBool(config.prohibitUseCacheIp) || !data.ReadBool(config.bIpv6) ||
+        !data.ReadBool(config.bSpecificNetwork) || !data.ReadBool(config.isStaticIpv4) ||
+        !data.ReadBool(config.bIpv4)) {
         reply.WriteInt32(0);
         reply.WriteInt32(DHCP_E_INVALID_PARAM);
         return 0;
     }
-    config.linkMode = static_cast<DhcpLinkMode>(linkMode);
-    std::copy(clientKey.begin(), clientKey.end(), config.clientKey.begin());
+    uint8_t linkMode = 0;
+    // An entirely absent extension is the legacy L2 request. A partial extension is invalid.
+    if (data.GetReadableBytes() != 0) {
+        std::vector<uint8_t> clientKey;
+        if (!data.ReadUint8(linkMode) || linkMode > static_cast<uint8_t>(DhcpLinkMode::L3_TUN) ||
+            !data.ReadUInt8Vector(&clientKey) || clientKey.size() != config.clientKey.size() ||
+            data.GetReadableBytes() != 0) {
+            reply.WriteInt32(0);
+            reply.WriteInt32(DHCP_E_INVALID_PARAM);
+            return 0;
+        }
+        config.linkMode = static_cast<DhcpLinkMode>(linkMode);
+        std::copy(clientKey.begin(), clientKey.end(), config.clientKey.begin());
+    }
     ErrCode ret = StartDhcpClient(config);
     if (ret != DHCP_E_SUCCESS) {
         DHCP_LOGE("[DHCP][ClientStub] start rejected, ifname:%{public}s mode:%{public}u ret:%{public}d",

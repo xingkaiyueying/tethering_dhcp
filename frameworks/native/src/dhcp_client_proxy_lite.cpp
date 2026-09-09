@@ -160,10 +160,12 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
     (void)WriteBool(&req, config.bSpecificNetwork);
     (void)WriteBool(&req, config.isStaticIpv4);
     (void)WriteBool(&req, config.bIpv4);
-    (void)WriteInt32(&req, static_cast<int32_t>(config.linkMode));
-    (void)WriteInt32(&req, static_cast<int32_t>(config.clientKey.size()));
-    for (uint8_t value : config.clientKey) {
-        (void)WriteInt32(&req, value);
+    if (config.linkMode != DhcpLinkMode::L2_PACKET) {
+        (void)WriteInt32(&req, static_cast<int32_t>(config.linkMode));
+        (void)WriteInt32(&req, static_cast<int32_t>(config.clientKey.size()));
+        for (uint8_t value : config.clientKey) {
+            (void)WriteInt32(&req, value);
+        }
     }
     owner.funcId = static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT);
     int error = remote_->Invoke(remote_,

@@ -6,7 +6,10 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <net/if.h>
-#include <stdatomic.h>
+#include <atomic>
+using std::atomic_int;
+using std::atomic_load;
+using std::atomic_store;
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -25,7 +28,24 @@ static atomic_int g_clientDone;
 static atomic_int g_clientPassed;
 static DhcpResult g_clientResult;
 
-extern int SetDhcpProbeToken(void);
+#include "accesstoken_kit.h"
+#include "nativetoken_kit.h"
+#include "token_setproc.h"
+
+static int SetProbeToken(void)
+{
+    const char *permissions[] = { "ohos.permission.NETWORK_DHCP" };
+    NativeTokenInfoParams info = {};
+    info.permsNum = sizeof(permissions) / sizeof(permissions[0]);
+    info.perms = permissions;
+    info.processName = "sleip_dhcp_stage2";
+    info.aplStr = "system_core";
+    uint64_t token = GetAccessTokenId(&info);
+    if (token == 0) return -1;
+    int ret = SetSelfTokenID(token);
+    return ret == 0 ? OHOS::Security::AccessToken::AccessTokenKit::ReloadNativeTokenInfo() : ret;
+}
+
 
 #define DHCP_LOG(fmt, ...) printf("[DHCP][PROBE] " fmt "\n", ##__VA_ARGS__)
 
@@ -187,35 +207,13 @@ static void OnIpFail(int status, const char *ifname, const char *reason)
     atomic_store(&g_clientDone, 1);
 }
 
-static int RunConfigRoundtrip(void)
+static int RunLayoutCheck(void)
 {
-    RouterConfig source = {0};
-    RouterConfig decoded = {0};
-    const uint8_t expected[DHCP_CLIENT_KEY_LEN] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
-    source.linkMode = DHCP_LINK_MODE_L3_TUN;
-    memcpy(source.clientKey, expected, sizeof(expected));
-    memcpy(&decoded, &source, sizeof(source));
-    bool passed = decoded.linkMode == DHCP_LINK_MODE_L3_TUN &&
-        memcmp(decoded.clientKey, expected, sizeof(expected)) == 0;
-    printf("mode=%u key=02:11:22:33:44:55 default_mode=%u\n", decoded.linkMode, DHCP_LINK_MODE_L2_PACKET);
-    PrintResult(passed, "CONFIG", passed ? 0 : -1);
-    return passed ? 0 : 1;
-}
-
-static int RunPacketVector(void)
-{
-    const uint8_t key[DHCP_CLIENT_KEY_LEN] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
-    uint8_t chaddr[16] = {0};
-    uint8_t clientId[DHCP_CLIENT_KEY_LEN + 3] = {CLIENT_ID_OPTION, DHCP_CLIENT_KEY_LEN + 1, 1};
-    memcpy(chaddr, key, sizeof(key));
-    memcpy(clientId + 3, key, sizeof(key));
-    RouterConfig defaultConfig = {0};
-    bool passed = memcmp(chaddr, key, sizeof(key)) == 0 && clientId[0] == CLIENT_ID_OPTION &&
-        clientId[1] == DHCP_CLIENT_KEY_LEN + 1 && clientId[2] == 1 &&
-        memcmp(clientId + 3, key, sizeof(key)) == 0 && defaultConfig.linkMode == DHCP_LINK_MODE_L2_PACKET;
-    printf("discover_chaddr=02:11:22:33:44:55 request_chaddr=02:11:22:33:44:55 option61=1:02:11:22:33:44:55\n");
-    PrintResult(passed, "VECTOR", passed ? 0 : -1);
-    return passed ? 0 : 1;
+    printf("scope=local-layout-only production_ipc=NOT_TESTED production_packet=NOT_TESTED\n");
+    printf("RouterConfig_size=%zu client_key_length=%u L2=%u L3=%u\n",
+        sizeof(RouterConfig), DHCP_CLIENT_KEY_LEN, DHCP_LINK_MODE_L2_PACKET, DHCP_LINK_MODE_L3_TUN);
+    PrintResult(true, "LAYOUT_ONLY", 0);
+    return 0;
 }
 
 static int RunServerStart(const char *ifname, const char *start, const char *end)
@@ -259,8 +257,8 @@ static int RunClientStart(const char *ifname, const char *keyText)
     config.bIpv4 = true;
     config.bIpv6 = false;
     config.prohibitUseCacheIp = true;
-    config.linkMode = DHCP_LINK_MODE_L3_TUN;
-    if (!ParseClientKey(keyText, config.clientKey)) {
+    uint8_t clientKey[DHCP_CLIENT_KEY_LEN] = {0};
+    if (!ParseClientKey(keyText, clientKey)) {
         PrintResult(false, "CONFIG", DHCP_INVALID_PARAM);
         return 1;
     }
@@ -269,7 +267,7 @@ static int RunClientStart(const char *ifname, const char *keyText)
     DhcpErrorCode ret = RegisterDhcpClientCallBack(ifname, &callback);
     DHCP_LOG("client callback registration iface=%s ret=%d", ifname, ret);
     if (ret == DHCP_SUCCESS) {
-        ret = StartDhcpClient(&config);
+        ret = StartDhcpClientL3(&config, clientKey, sizeof(clientKey));
         DHCP_LOG("client start requested iface=%s ret=%d", ifname, ret);
     } else {
         DHCP_LOG("client flow exit before start: callback registration failed ret=%d", ret);
@@ -317,17 +315,19 @@ static int RunStop(const char *ifname)
 
 static void Usage(const char *program)
 {
-    fprintf(stderr, "usage: %s config-roundtrip|packet-vector|server-start IFACE START END|"
+    fprintf(stderr, "usage: %s [--no-token] layout-check|server-start IFACE START END|"
         "client-start IFACE KEY|status IFACE|stop IFACE\n", program);
 }
 
 int main(int argc, char *argv[])
 {
+    bool noToken = argc > 1 && strcmp(argv[1], "--no-token") == 0;
+    if (noToken) { --argc; ++argv; }
     DHCP_LOG("probe begin command=%s", argc > 1 ? argv[1] : "-");
     bool needsDhcpPermission = argc > 1 && (strcmp(argv[1], "server-start") == 0 ||
         strcmp(argv[1], "client-start") == 0 || strcmp(argv[1], "status") == 0 || strcmp(argv[1], "stop") == 0);
-    if (needsDhcpPermission) {
-        int tokenRet = SetDhcpProbeToken();
+    if (needsDhcpPermission && !noToken) {
+        int tokenRet = SetProbeToken();
         if (tokenRet != 0) {
             DHCP_LOG("native token setup failed ret=%d", tokenRet);
             PrintResult(false, "AUTH", tokenRet);
@@ -335,8 +335,7 @@ int main(int argc, char *argv[])
         }
         DHCP_LOG("native token setup succeeded permission=ohos.permission.NETWORK_DHCP");
     }
-    if (argc == 2 && strcmp(argv[1], "config-roundtrip") == 0) return RunConfigRoundtrip();
-    if (argc == 2 && strcmp(argv[1], "packet-vector") == 0) return RunPacketVector();
+    if (argc == 2 && strcmp(argv[1], "layout-check") == 0) return RunLayoutCheck();
     if (argc == 5 && strcmp(argv[1], "server-start") == 0) return RunServerStart(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "client-start") == 0) return RunClientStart(argv[2], argv[3]);
     if (argc == 3 && strcmp(argv[1], "status") == 0) return RunStatus(argv[2]);

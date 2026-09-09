@@ -129,16 +129,12 @@ typedef struct RouterConfig {
     bool bSpecificNetwork { false };
     bool isStaticIpv4 { false };
     bool bIpv4 { true };
-    uint8_t linkMode { DHCP_LINK_MODE_L2_PACKET };
-    uint8_t clientKey[DHCP_CLIENT_KEY_LEN] { 0 };
 #else
     bool prohibitUseCacheIp;
     bool bIpv6;
     bool bSpecificNetwork;
     bool isStaticIpv4;
     bool bIpv4;
-    uint8_t linkMode;
-    uint8_t clientKey[DHCP_CLIENT_KEY_LEN];
 #endif
 }RouterConfig;
 
