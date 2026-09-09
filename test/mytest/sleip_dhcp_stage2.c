@@ -83,7 +83,7 @@ static bool IsExpectedLease(const char *address)
 static int SetInterfaceIpv4Value(int fd, const char *ifname, const char *value, unsigned long request,
     const char *label)
 {
-    struct ifreq ifr = {0};
+    struct ifreq ifr = {};
     struct sockaddr_in address = {0};
     if (ifname == NULL || value == NULL || snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0 ||
         strlen(ifname) >= IFNAMSIZ) {
@@ -107,7 +107,7 @@ static int SetInterfaceIpv4Value(int fd, const char *ifname, const char *value, 
 
 static int SetInterfaceUp(int fd, const char *ifname)
 {
-    struct ifreq ifr = {0};
+    struct ifreq ifr = {};
     if (ifname == NULL || strlen(ifname) >= IFNAMSIZ ||
         snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0) {
         DHCP_LOG("interface up failed: invalid iface");
@@ -251,7 +251,7 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
 static int RunClientStart(const char *ifname, const char *keyText)
 {
     DHCP_LOG("client flow begin iface=%s mode=L3_TUN", ifname);
-    RouterConfig config = {0};
+    RouterConfig config = {};
     ClientCallBack callback = {OnIpSuccess, OnIpFail};
     snprintf(config.ifname, sizeof(config.ifname), "%s", ifname);
     config.bIpv4 = true;
@@ -289,7 +289,7 @@ static int RunClientStart(const char *ifname, const char *keyText)
 static int RunStatus(const char *ifname)
 {
     DHCP_LOG("status query begin iface=%s", ifname);
-    DhcpStationInfo stations[16] = {0};
+    DhcpStationInfo stations[16] = {};
     int size = 0;
     DhcpErrorCode ret = GetDhcpClientInfos(ifname, 16, stations, &size);
     DHCP_LOG("status query complete iface=%s ret=%d leases=%d", ifname, ret, size);
