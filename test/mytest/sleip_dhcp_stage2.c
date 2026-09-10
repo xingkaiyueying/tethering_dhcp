@@ -6,6 +6,9 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <net/if.h>
+#include <linux/fib_rules.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 #include <atomic>
 using std::atomic_int;
 using std::atomic_load;
@@ -17,6 +20,7 @@ using std::atomic_store;
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "dhcp_c_api.h"
@@ -53,6 +57,74 @@ static void PrintResult(bool passed, const char *phase, int code)
 {
     DHCP_LOG("complete phase=%s result=%s code=%d", phase, passed ? "PASS" : "FAIL", code);
     printf("RESULT=%s phase=%s code=%d\n", passed ? "PASS" : "FAIL", phase, code);
+}
+
+// Standalone Stage 2 fixture only. Product routing belongs to NetConn/Netsys.
+// Reserve this exact rule for the probe, including a manually installed copy.
+static int ConfigureTestPolicy(const char *ifname, bool add)
+{
+    if (ifname == NULL || strcmp(ifname, "sleip0") != 0) {
+        return -EINVAL;
+    }
+    struct {
+        struct nlmsghdr header;
+        struct fib_rule_hdr rule;
+        uint8_t attributes[RTA_SPACE(sizeof(uint32_t)) * 2];
+    } request = {};
+    request.header.nlmsg_len = NLMSG_LENGTH(sizeof(request.rule));
+    request.header.nlmsg_type = add ? RTM_NEWRULE : RTM_DELRULE;
+    request.header.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+    if (add) request.header.nlmsg_flags |= NLM_F_CREATE | NLM_F_EXCL;
+    request.header.nlmsg_seq = 1;
+    request.rule.family = AF_INET;
+    request.rule.dst_len = 24;
+    request.rule.table = RT_TABLE_MAIN;
+    request.rule.action = FR_ACT_TO_TBL;
+    const uint32_t values[] = {htonl(0xC0A84D00), 10900};
+    const uint16_t types[] = {FRA_DST, FRA_PRIORITY};
+    for (size_t i = 0; i < 2; ++i) {
+        auto *attribute = reinterpret_cast<struct rtattr *>(
+            reinterpret_cast<uint8_t *>(&request) + NLMSG_ALIGN(request.header.nlmsg_len));
+        attribute->rta_type = types[i];
+        attribute->rta_len = RTA_LENGTH(sizeof(values[i]));
+        memcpy(RTA_DATA(attribute), &values[i], sizeof(values[i]));
+        request.header.nlmsg_len = NLMSG_ALIGN(request.header.nlmsg_len) + RTA_SPACE(sizeof(values[i]));
+    }
+    int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+    if (fd < 0) return -errno;
+    struct timeval timeout = {3, 0};
+    int ret = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        ret = -errno;
+    }
+    struct sockaddr_nl kernel = {};
+    kernel.nl_family = AF_NETLINK;
+    if (ret == 0 && sendto(fd, &request, request.header.nlmsg_len, 0,
+        reinterpret_cast<struct sockaddr *>(&kernel), sizeof(kernel)) < 0) {
+        ret = -errno;
+    }
+    if (ret == 0) {
+        alignas(struct nlmsghdr) uint8_t reply[4096] = {};
+        socklen_t peerLength = sizeof(kernel);
+        ssize_t received = recvfrom(fd, reply, sizeof(reply), 0,
+            reinterpret_cast<struct sockaddr *>(&kernel), &peerLength);
+        ret = received < 0 ? -errno : -EPROTO;
+        if (received >= static_cast<ssize_t>(NLMSG_LENGTH(sizeof(struct nlmsgerr))) &&
+            kernel.nl_pid == 0) {
+            auto *header = reinterpret_cast<struct nlmsghdr *>(reply);
+            if (header->nlmsg_len <= static_cast<size_t>(received) &&
+                header->nlmsg_len >= NLMSG_LENGTH(sizeof(struct nlmsgerr)) &&
+                header->nlmsg_seq == 1 && header->nlmsg_type == NLMSG_ERROR) {
+                ret = reinterpret_cast<struct nlmsgerr *>(NLMSG_DATA(header))->error;
+            }
+        }
+    }
+    close(fd);
+    // EXCL only accepts an already matching rule; deletion tolerates an absent fixture.
+    if ((add && ret == -EEXIST) || (!add && ret == -ENOENT)) ret = 0;
+    DHCP_LOG("test policy %s iface=%s destination=192.168.77.0/24 priority=10900 table=main ret=%d",
+        add ? "add" : "remove", ifname, ret);
+    return ret;
 }
 
 static bool ParseClientKey(const char *text, uint8_t key[DHCP_CLIENT_KEY_LEN])
@@ -228,6 +300,10 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
     snprintf(range.strSubnet, sizeof(range.strSubnet), "255.255.255.0");
     char serverAddress[INET_ADDRSTRLEN] = {0};
     int configRet = DeriveServerAddress(start, end, range.strSubnet, serverAddress);
+    if (configRet == 0 && (strcmp(ifname, "sleip0") != 0 || strcmp(serverAddress, "192.168.77.1") != 0)) {
+        DHCP_LOG("standalone fixture requires sleip0 and 192.168.77.0/24");
+        configRet = -EINVAL;
+    }
     if (configRet == 0) {
         configRet = ConfigureServerInterface(ifname, serverAddress, range.strSubnet);
     }
@@ -244,6 +320,14 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
     } else {
         DHCP_LOG("server flow exit before start: SetDhcpRange failed ret=%d", ret);
     }
+    if (ret == DHCP_SUCCESS) {
+        int policyRet = ConfigureTestPolicy(ifname, true);
+        if (policyRet != 0) {
+            DHCP_LOG("server rollback ret=%d", StopDhcpServer(ifname));
+            PrintResult(false, "ROUTE", policyRet);
+            return 1;
+        }
+    }
     PrintResult(ret == DHCP_SUCCESS, "SERVING", ret);
     return ret == DHCP_SUCCESS ? 0 : 1;
 }
@@ -251,6 +335,10 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
 static int RunClientStart(const char *ifname, const char *keyText)
 {
     DHCP_LOG("client flow begin iface=%s mode=L3_TUN", ifname);
+    if (strcmp(ifname, "sleip0") != 0) {
+        PrintResult(false, "CONFIG", -EINVAL);
+        return 1;
+    }
     RouterConfig config = {};
     ClientCallBack callback = {OnIpSuccess, OnIpFail};
     snprintf(config.ifname, sizeof(config.ifname), "%s", ifname);
@@ -281,6 +369,14 @@ static int RunClientStart(const char *ifname, const char *keyText)
     } else if (ret == DHCP_SUCCESS && !atomic_load(&g_clientPassed)) {
         DHCP_LOG("client callback completed but lease validation failed");
     }
+    if (passed) {
+        int policyRet = ConfigureTestPolicy(ifname, true);
+        if (policyRet != 0) {
+            DHCP_LOG("client rollback ret=%d", StopDhcpClient(ifname, false, true));
+            PrintResult(false, "ROUTE", policyRet);
+            return 1;
+        }
+    }
     printf("lease=%s\n", passed ? g_clientResult.strOptClientId : "-");
     PrintResult(passed, passed ? "BOUND" : "REQUEST", passed ? 0 : (ret == DHCP_SUCCESS ? -1 : ret));
     return passed ? 0 : 1;
@@ -306,6 +402,11 @@ static int RunStop(const char *ifname)
     DHCP_LOG("client stop complete iface=%s ret=%d", ifname, clientRet);
     DhcpErrorCode serverRet = StopDhcpServer(ifname);
     DHCP_LOG("server stop complete iface=%s ret=%d", ifname, serverRet);
+    int policyRet = ConfigureTestPolicy(ifname, false);
+    if (policyRet != 0) {
+        PrintResult(false, "ROUTE_CLEANUP", policyRet);
+        return 1;
+    }
     bool passed = (clientRet == DHCP_SUCCESS || clientRet == DHCP_FAILED) &&
         (serverRet == DHCP_SUCCESS || serverRet == DHCP_FAILED);
     printf("client_stop=%d server_stop=%d\n", clientRet, serverRet);
