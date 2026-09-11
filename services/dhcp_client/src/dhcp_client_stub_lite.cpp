@@ -133,32 +133,43 @@ int DhcpClientStub::OnStartDhcpClient(uint32_t code, IpcIo *req, IpcIo *reply)
 
     size_t readLen;
     RouterConfig config;
-    bool bIpv6;
-    std::string ifname = (char *)ReadString(req, &readLen);
-    std::string bssid = (char *)ReadString(req, &readLen);
-    (void)ReadBool(req, &config.prohibitUseCacheIp);
-    (void)ReadBool(req, &config.bIpv6);
-    (void)ReadBool(req, &config.bSpecificNetwork);
-    (void)ReadBool(req, &config.isStaticIpv4);
-    (void)ReadBool(req, &config.bIpv4);
-    int32_t linkMode = 0;
-    int32_t clientKeyLen = 0;
-    if (!ReadInt32(req, &linkMode) || !ReadInt32(req, &clientKeyLen) ||
-        linkMode < 0 || linkMode > static_cast<int32_t>(DhcpLinkMode::L3_TUN) ||
-        clientKeyLen != static_cast<int32_t>(config.clientKey.size())) {
+    const char *rawIfname = (const char *)ReadString(req, &readLen);
+    const char *rawBssid = (const char *)ReadString(req, &readLen);
+    if (rawIfname == nullptr || rawBssid == nullptr || !ReadBool(req, &config.prohibitUseCacheIp) ||
+        !ReadBool(req, &config.bIpv6) || !ReadBool(req, &config.bSpecificNetwork) ||
+        !ReadBool(req, &config.isStaticIpv4) || !ReadBool(req, &config.bIpv4)) {
         (void)WriteInt32(reply, 0);
         (void)WriteInt32(reply, DHCP_E_INVALID_PARAM);
         return DHCP_OPT_FAILED;
     }
-    config.linkMode = static_cast<DhcpLinkMode>(linkMode);
-    for (uint8_t &value : config.clientKey) {
-        int32_t item = 0;
-        if (!ReadInt32(req, &item) || item < 0 || item > 0xFF) {
+    std::string ifname = rawIfname;
+    std::string bssid = rawBssid;
+    // bufferLeft is zero only for a complete legacy request.
+    if (req->bufferLeft != 0) {
+        int32_t linkMode = 0;
+        int32_t clientKeyLen = 0;
+        if (!ReadInt32(req, &linkMode) || !ReadInt32(req, &clientKeyLen) ||
+            linkMode < 0 || linkMode > static_cast<int32_t>(DhcpLinkMode::L3_TUN) ||
+            clientKeyLen != static_cast<int32_t>(config.clientKey.size())) {
             (void)WriteInt32(reply, 0);
             (void)WriteInt32(reply, DHCP_E_INVALID_PARAM);
             return DHCP_OPT_FAILED;
         }
-        value = static_cast<uint8_t>(item);
+        config.linkMode = static_cast<DhcpLinkMode>(linkMode);
+        for (uint8_t &value : config.clientKey) {
+            int32_t item = 0;
+            if (!ReadInt32(req, &item) || item < 0 || item > 0xFF) {
+                (void)WriteInt32(reply, 0);
+                (void)WriteInt32(reply, DHCP_E_INVALID_PARAM);
+                return DHCP_OPT_FAILED;
+            }
+            value = static_cast<uint8_t>(item);
+        }
+        if (req->bufferLeft != 0) {
+            (void)WriteInt32(reply, 0);
+            (void)WriteInt32(reply, DHCP_E_INVALID_PARAM);
+            return DHCP_OPT_FAILED;
+        }
     }
     DHCP_LOGI("ifname:%{public}s prohibitUseCacheIp:%{public}d, bIpv6:%{public}d, bSpecificNetwork:%{public}d",
         ifname.c_str(), config.prohibitUseCacheIp, config.bIpv6, config.bSpecificNetwork);

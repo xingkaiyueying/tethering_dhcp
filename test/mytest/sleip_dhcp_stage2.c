@@ -6,7 +6,13 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <net/if.h>
-#include <stdatomic.h>
+#include <linux/fib_rules.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <atomic>
+using std::atomic_int;
+using std::atomic_load;
+using std::atomic_store;
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,6 +20,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "dhcp_c_api.h"
@@ -25,7 +32,24 @@ static atomic_int g_clientDone;
 static atomic_int g_clientPassed;
 static DhcpResult g_clientResult;
 
-extern int SetDhcpProbeToken(void);
+#include "accesstoken_kit.h"
+#include "nativetoken_kit.h"
+#include "token_setproc.h"
+
+static int SetProbeToken(void)
+{
+    const char *permissions[] = { "ohos.permission.NETWORK_DHCP" };
+    NativeTokenInfoParams info = {};
+    info.permsNum = sizeof(permissions) / sizeof(permissions[0]);
+    info.perms = permissions;
+    info.processName = "sleip_dhcp_stage2";
+    info.aplStr = "system_core";
+    uint64_t token = GetAccessTokenId(&info);
+    if (token == 0) return -1;
+    int ret = SetSelfTokenID(token);
+    return ret == 0 ? OHOS::Security::AccessToken::AccessTokenKit::ReloadNativeTokenInfo() : ret;
+}
+
 
 #define DHCP_LOG(fmt, ...) printf("[DHCP][PROBE] " fmt "\n", ##__VA_ARGS__)
 
@@ -33,6 +57,74 @@ static void PrintResult(bool passed, const char *phase, int code)
 {
     DHCP_LOG("complete phase=%s result=%s code=%d", phase, passed ? "PASS" : "FAIL", code);
     printf("RESULT=%s phase=%s code=%d\n", passed ? "PASS" : "FAIL", phase, code);
+}
+
+// Standalone Stage 2 fixture only. Product routing belongs to NetConn/Netsys.
+// Reserve this exact rule for the probe, including a manually installed copy.
+static int ConfigureTestPolicy(const char *ifname, bool add)
+{
+    if (ifname == NULL || strcmp(ifname, "sleip0") != 0) {
+        return -EINVAL;
+    }
+    struct {
+        struct nlmsghdr header;
+        struct fib_rule_hdr rule;
+        uint8_t attributes[RTA_SPACE(sizeof(uint32_t)) * 2];
+    } request = {};
+    request.header.nlmsg_len = NLMSG_LENGTH(sizeof(request.rule));
+    request.header.nlmsg_type = add ? RTM_NEWRULE : RTM_DELRULE;
+    request.header.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+    if (add) request.header.nlmsg_flags |= NLM_F_CREATE | NLM_F_EXCL;
+    request.header.nlmsg_seq = 1;
+    request.rule.family = AF_INET;
+    request.rule.dst_len = 24;
+    request.rule.table = RT_TABLE_MAIN;
+    request.rule.action = FR_ACT_TO_TBL;
+    const uint32_t values[] = {htonl(0xC0A84D00), 10900};
+    const uint16_t types[] = {FRA_DST, FRA_PRIORITY};
+    for (size_t i = 0; i < 2; ++i) {
+        auto *attribute = reinterpret_cast<struct rtattr *>(
+            reinterpret_cast<uint8_t *>(&request) + NLMSG_ALIGN(request.header.nlmsg_len));
+        attribute->rta_type = types[i];
+        attribute->rta_len = RTA_LENGTH(sizeof(values[i]));
+        memcpy(RTA_DATA(attribute), &values[i], sizeof(values[i]));
+        request.header.nlmsg_len = NLMSG_ALIGN(request.header.nlmsg_len) + RTA_SPACE(sizeof(values[i]));
+    }
+    int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+    if (fd < 0) return -errno;
+    struct timeval timeout = {3, 0};
+    int ret = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        ret = -errno;
+    }
+    struct sockaddr_nl kernel = {};
+    kernel.nl_family = AF_NETLINK;
+    if (ret == 0 && sendto(fd, &request, request.header.nlmsg_len, 0,
+        reinterpret_cast<struct sockaddr *>(&kernel), sizeof(kernel)) < 0) {
+        ret = -errno;
+    }
+    if (ret == 0) {
+        alignas(struct nlmsghdr) uint8_t reply[4096] = {};
+        socklen_t peerLength = sizeof(kernel);
+        ssize_t received = recvfrom(fd, reply, sizeof(reply), 0,
+            reinterpret_cast<struct sockaddr *>(&kernel), &peerLength);
+        ret = received < 0 ? -errno : -EPROTO;
+        if (received >= static_cast<ssize_t>(NLMSG_LENGTH(sizeof(struct nlmsgerr))) &&
+            kernel.nl_pid == 0) {
+            auto *header = reinterpret_cast<struct nlmsghdr *>(reply);
+            if (header->nlmsg_len <= static_cast<size_t>(received) &&
+                header->nlmsg_len >= NLMSG_LENGTH(sizeof(struct nlmsgerr)) &&
+                header->nlmsg_seq == 1 && header->nlmsg_type == NLMSG_ERROR) {
+                ret = reinterpret_cast<struct nlmsgerr *>(NLMSG_DATA(header))->error;
+            }
+        }
+    }
+    close(fd);
+    // EXCL only accepts an already matching rule; deletion tolerates an absent fixture.
+    if ((add && ret == -EEXIST) || (!add && ret == -ENOENT)) ret = 0;
+    DHCP_LOG("test policy %s iface=%s destination=192.168.77.0/24 priority=10900 table=main ret=%d",
+        add ? "add" : "remove", ifname, ret);
+    return ret;
 }
 
 static bool ParseClientKey(const char *text, uint8_t key[DHCP_CLIENT_KEY_LEN])
@@ -63,7 +155,7 @@ static bool IsExpectedLease(const char *address)
 static int SetInterfaceIpv4Value(int fd, const char *ifname, const char *value, unsigned long request,
     const char *label)
 {
-    struct ifreq ifr = {0};
+    struct ifreq ifr = {};
     struct sockaddr_in address = {0};
     if (ifname == NULL || value == NULL || snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0 ||
         strlen(ifname) >= IFNAMSIZ) {
@@ -87,7 +179,7 @@ static int SetInterfaceIpv4Value(int fd, const char *ifname, const char *value, 
 
 static int SetInterfaceUp(int fd, const char *ifname)
 {
-    struct ifreq ifr = {0};
+    struct ifreq ifr = {};
     if (ifname == NULL || strlen(ifname) >= IFNAMSIZ ||
         snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname) < 0) {
         DHCP_LOG("interface up failed: invalid iface");
@@ -187,35 +279,13 @@ static void OnIpFail(int status, const char *ifname, const char *reason)
     atomic_store(&g_clientDone, 1);
 }
 
-static int RunConfigRoundtrip(void)
+static int RunLayoutCheck(void)
 {
-    RouterConfig source = {0};
-    RouterConfig decoded = {0};
-    const uint8_t expected[DHCP_CLIENT_KEY_LEN] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
-    source.linkMode = DHCP_LINK_MODE_L3_TUN;
-    memcpy(source.clientKey, expected, sizeof(expected));
-    memcpy(&decoded, &source, sizeof(source));
-    bool passed = decoded.linkMode == DHCP_LINK_MODE_L3_TUN &&
-        memcmp(decoded.clientKey, expected, sizeof(expected)) == 0;
-    printf("mode=%u key=02:11:22:33:44:55 default_mode=%u\n", decoded.linkMode, DHCP_LINK_MODE_L2_PACKET);
-    PrintResult(passed, "CONFIG", passed ? 0 : -1);
-    return passed ? 0 : 1;
-}
-
-static int RunPacketVector(void)
-{
-    const uint8_t key[DHCP_CLIENT_KEY_LEN] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
-    uint8_t chaddr[16] = {0};
-    uint8_t clientId[DHCP_CLIENT_KEY_LEN + 3] = {CLIENT_ID_OPTION, DHCP_CLIENT_KEY_LEN + 1, 1};
-    memcpy(chaddr, key, sizeof(key));
-    memcpy(clientId + 3, key, sizeof(key));
-    RouterConfig defaultConfig = {0};
-    bool passed = memcmp(chaddr, key, sizeof(key)) == 0 && clientId[0] == CLIENT_ID_OPTION &&
-        clientId[1] == DHCP_CLIENT_KEY_LEN + 1 && clientId[2] == 1 &&
-        memcmp(clientId + 3, key, sizeof(key)) == 0 && defaultConfig.linkMode == DHCP_LINK_MODE_L2_PACKET;
-    printf("discover_chaddr=02:11:22:33:44:55 request_chaddr=02:11:22:33:44:55 option61=1:02:11:22:33:44:55\n");
-    PrintResult(passed, "VECTOR", passed ? 0 : -1);
-    return passed ? 0 : 1;
+    printf("scope=local-layout-only production_ipc=NOT_TESTED production_packet=NOT_TESTED\n");
+    printf("RouterConfig_size=%zu client_key_length=%u L2=%u L3=%u\n",
+        sizeof(RouterConfig), DHCP_CLIENT_KEY_LEN, DHCP_LINK_MODE_L2_PACKET, DHCP_LINK_MODE_L3_TUN);
+    PrintResult(true, "LAYOUT_ONLY", 0);
+    return 0;
 }
 
 static int RunServerStart(const char *ifname, const char *start, const char *end)
@@ -230,6 +300,10 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
     snprintf(range.strSubnet, sizeof(range.strSubnet), "255.255.255.0");
     char serverAddress[INET_ADDRSTRLEN] = {0};
     int configRet = DeriveServerAddress(start, end, range.strSubnet, serverAddress);
+    if (configRet == 0 && (strcmp(ifname, "sleip0") != 0 || strcmp(serverAddress, "192.168.77.1") != 0)) {
+        DHCP_LOG("standalone fixture requires sleip0 and 192.168.77.0/24");
+        configRet = -EINVAL;
+    }
     if (configRet == 0) {
         configRet = ConfigureServerInterface(ifname, serverAddress, range.strSubnet);
     }
@@ -246,6 +320,14 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
     } else {
         DHCP_LOG("server flow exit before start: SetDhcpRange failed ret=%d", ret);
     }
+    if (ret == DHCP_SUCCESS) {
+        int policyRet = ConfigureTestPolicy(ifname, true);
+        if (policyRet != 0) {
+            DHCP_LOG("server rollback ret=%d", StopDhcpServer(ifname));
+            PrintResult(false, "ROUTE", policyRet);
+            return 1;
+        }
+    }
     PrintResult(ret == DHCP_SUCCESS, "SERVING", ret);
     return ret == DHCP_SUCCESS ? 0 : 1;
 }
@@ -253,14 +335,18 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
 static int RunClientStart(const char *ifname, const char *keyText)
 {
     DHCP_LOG("client flow begin iface=%s mode=L3_TUN", ifname);
-    RouterConfig config = {0};
+    if (strcmp(ifname, "sleip0") != 0) {
+        PrintResult(false, "CONFIG", -EINVAL);
+        return 1;
+    }
+    RouterConfig config = {};
     ClientCallBack callback = {OnIpSuccess, OnIpFail};
     snprintf(config.ifname, sizeof(config.ifname), "%s", ifname);
     config.bIpv4 = true;
     config.bIpv6 = false;
     config.prohibitUseCacheIp = true;
-    config.linkMode = DHCP_LINK_MODE_L3_TUN;
-    if (!ParseClientKey(keyText, config.clientKey)) {
+    uint8_t clientKey[DHCP_CLIENT_KEY_LEN] = {0};
+    if (!ParseClientKey(keyText, clientKey)) {
         PrintResult(false, "CONFIG", DHCP_INVALID_PARAM);
         return 1;
     }
@@ -269,7 +355,7 @@ static int RunClientStart(const char *ifname, const char *keyText)
     DhcpErrorCode ret = RegisterDhcpClientCallBack(ifname, &callback);
     DHCP_LOG("client callback registration iface=%s ret=%d", ifname, ret);
     if (ret == DHCP_SUCCESS) {
-        ret = StartDhcpClient(&config);
+        ret = StartDhcpClientL3(&config, clientKey, sizeof(clientKey));
         DHCP_LOG("client start requested iface=%s ret=%d", ifname, ret);
     } else {
         DHCP_LOG("client flow exit before start: callback registration failed ret=%d", ret);
@@ -283,6 +369,14 @@ static int RunClientStart(const char *ifname, const char *keyText)
     } else if (ret == DHCP_SUCCESS && !atomic_load(&g_clientPassed)) {
         DHCP_LOG("client callback completed but lease validation failed");
     }
+    if (passed) {
+        int policyRet = ConfigureTestPolicy(ifname, true);
+        if (policyRet != 0) {
+            DHCP_LOG("client rollback ret=%d", StopDhcpClient(ifname, false, true));
+            PrintResult(false, "ROUTE", policyRet);
+            return 1;
+        }
+    }
     printf("lease=%s\n", passed ? g_clientResult.strOptClientId : "-");
     PrintResult(passed, passed ? "BOUND" : "REQUEST", passed ? 0 : (ret == DHCP_SUCCESS ? -1 : ret));
     return passed ? 0 : 1;
@@ -291,7 +385,7 @@ static int RunClientStart(const char *ifname, const char *keyText)
 static int RunStatus(const char *ifname)
 {
     DHCP_LOG("status query begin iface=%s", ifname);
-    DhcpStationInfo stations[16] = {0};
+    DhcpStationInfo stations[16] = {};
     int size = 0;
     DhcpErrorCode ret = GetDhcpClientInfos(ifname, 16, stations, &size);
     DHCP_LOG("status query complete iface=%s ret=%d leases=%d", ifname, ret, size);
@@ -308,6 +402,11 @@ static int RunStop(const char *ifname)
     DHCP_LOG("client stop complete iface=%s ret=%d", ifname, clientRet);
     DhcpErrorCode serverRet = StopDhcpServer(ifname);
     DHCP_LOG("server stop complete iface=%s ret=%d", ifname, serverRet);
+    int policyRet = ConfigureTestPolicy(ifname, false);
+    if (policyRet != 0) {
+        PrintResult(false, "ROUTE_CLEANUP", policyRet);
+        return 1;
+    }
     bool passed = (clientRet == DHCP_SUCCESS || clientRet == DHCP_FAILED) &&
         (serverRet == DHCP_SUCCESS || serverRet == DHCP_FAILED);
     printf("client_stop=%d server_stop=%d\n", clientRet, serverRet);
@@ -317,17 +416,19 @@ static int RunStop(const char *ifname)
 
 static void Usage(const char *program)
 {
-    fprintf(stderr, "usage: %s config-roundtrip|packet-vector|server-start IFACE START END|"
+    fprintf(stderr, "usage: %s [--no-token] layout-check|server-start IFACE START END|"
         "client-start IFACE KEY|status IFACE|stop IFACE\n", program);
 }
 
 int main(int argc, char *argv[])
 {
+    bool noToken = argc > 1 && strcmp(argv[1], "--no-token") == 0;
+    if (noToken) { --argc; ++argv; }
     DHCP_LOG("probe begin command=%s", argc > 1 ? argv[1] : "-");
     bool needsDhcpPermission = argc > 1 && (strcmp(argv[1], "server-start") == 0 ||
         strcmp(argv[1], "client-start") == 0 || strcmp(argv[1], "status") == 0 || strcmp(argv[1], "stop") == 0);
-    if (needsDhcpPermission) {
-        int tokenRet = SetDhcpProbeToken();
+    if (needsDhcpPermission && !noToken) {
+        int tokenRet = SetProbeToken();
         if (tokenRet != 0) {
             DHCP_LOG("native token setup failed ret=%d", tokenRet);
             PrintResult(false, "AUTH", tokenRet);
@@ -335,8 +436,7 @@ int main(int argc, char *argv[])
         }
         DHCP_LOG("native token setup succeeded permission=ohos.permission.NETWORK_DHCP");
     }
-    if (argc == 2 && strcmp(argv[1], "config-roundtrip") == 0) return RunConfigRoundtrip();
-    if (argc == 2 && strcmp(argv[1], "packet-vector") == 0) return RunPacketVector();
+    if (argc == 2 && strcmp(argv[1], "layout-check") == 0) return RunLayoutCheck();
     if (argc == 5 && strcmp(argv[1], "server-start") == 0) return RunServerStart(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "client-start") == 0) return RunClientStart(argv[2], argv[3]);
     if (argc == 3 && strcmp(argv[1], "status") == 0) return RunStatus(argv[2]);

@@ -168,8 +168,10 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
     data.WriteBool(config.bSpecificNetwork);
     data.WriteBool(config.isStaticIpv4);
     data.WriteBool(config.bIpv4);
-    data.WriteUint8(static_cast<uint8_t>(config.linkMode));
-    data.WriteUInt8Vector(std::vector<uint8_t>(config.clientKey.begin(), config.clientKey.end()));
+    if (config.linkMode != DhcpLinkMode::L2_PACKET) {
+        data.WriteUint8(static_cast<uint8_t>(config.linkMode));
+        data.WriteUInt8Vector(std::vector<uint8_t>(config.clientKey.begin(), config.clientKey.end()));
+    }
     DHCP_LOGI("%{public}s, calling uid:%{public}d, ifname:%{public}s, prohibitUseCacheIp:%{public}d, bIpv6:%{public}d"\
         "bSpecificNetwork:%{public}d", __func__, GetCallingUid(), config.ifname.c_str(), config.prohibitUseCacheIp,
         config.bIpv6, config.bSpecificNetwork);
