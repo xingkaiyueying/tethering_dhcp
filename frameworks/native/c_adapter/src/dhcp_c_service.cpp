@@ -88,7 +88,7 @@ DhcpErrorCode RegisterDhcpClientReportCallBack(const char *ifname, const DhcpCli
     return DHCP_SUCCESS;
 }
 
-static DhcpErrorCode StartDhcpClientWithMode(const RouterConfig &config, const uint8_t *clientKey)
+NO_SANITIZE("cfi") static DhcpErrorCode StartDhcpClientWithMode(const RouterConfig &config, const uint8_t *clientKey)
 {
     if (dhcpClientPtr == nullptr) {
         DHCP_LOGE("[DHCP][CAdapter] start failed: callback must be registered first");
