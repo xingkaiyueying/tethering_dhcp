@@ -249,6 +249,11 @@ enum DhcpServerStatus {
 };
 namespace OHOS {
 namespace DHCP {
+struct L3Ipv6Address {
+    std::string address;
+    uint64_t observedAt{0};
+    uint32_t ifindex{0}, prefixLength{0}, flags{0}, preferredLifetime{0}, validLifetime{0};
+};
 inline const std::string IP_V4_MASK("255.255.255.0");
 inline const std::string IP_V4_DEFAULT("192.168.62.1");
 inline const uint32_t LIFETIME_INFINITY = 0xFFFFFFFF; // infinite lifetime
@@ -276,6 +281,8 @@ struct DhcpResult {
     uint32_t preferredLifetime {LIFETIME_INFINITY};
     uint32_t routeLifetime {LIFETIME_INFINITY};
     uint8_t raFlags { 0 };
+    bool l3Ipv6{false};
+    std::vector<L3Ipv6Address> l3Addresses;
     DhcpResult()
     {
         iptype      = -1;

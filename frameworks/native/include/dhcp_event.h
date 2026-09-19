@@ -25,6 +25,7 @@
 #include "securec.h"
 #include "dhcp_errcode.h"
 #include "kits/c/dhcp_result_event.h"
+#include "kits/c/dhcp_l3_ipv6.h"
 #include "i_dhcp_client_callback.h"
 #include "i_dhcp_server_callback.h"
 #include "inner_api/include/dhcp_define.h"
@@ -47,6 +48,8 @@ public:
     void ResultInfoCopyExt(DhcpResult &dhcpResult, OHOS::DHCP::DhcpResult& result);
     std::mutex callBackMutex;
     std::map<std::string, const ClientCallBack *> mapClientCallBack;
+    using L3Callback = void (*)(const char *, const DhcpL3Ipv6Snapshot *);
+    std::map<std::string, L3Callback> l3Callbacks;
     std::mutex mapReportMutex_;
     std::map<std::string, const DhcpClientReport *> mapDhcpClientReport_;
 };

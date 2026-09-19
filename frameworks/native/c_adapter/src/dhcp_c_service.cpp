@@ -130,6 +130,16 @@ NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClientL3(const RouterConfig *config,
     return StartDhcpClientWithMode(*config, clientKey);
 }
 
+NO_SANITIZE("cfi") DhcpErrorCode RegisterDhcpClientL3Ipv6CallBack(const char *ifname,
+    void (*callback)(const char *, const DhcpL3Ipv6Snapshot *))
+{
+    if (!ifname || !dhcpClientCallBack) return DHCP_INVALID_PARAM;
+    std::lock_guard<std::mutex> lock(dhcpClientCallBack->callBackMutex);
+    if (callback) dhcpClientCallBack->l3Callbacks[ifname] = callback;
+    else dhcpClientCallBack->l3Callbacks.erase(ifname);
+    return DHCP_SUCCESS;
+}
+
 DhcpErrorCode DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)
 {
     CHECK_PTR_RETURN(ipCacheInfo.ssid, DHCP_INVALID_PARAM);

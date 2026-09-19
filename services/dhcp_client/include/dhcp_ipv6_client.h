@@ -37,6 +37,11 @@ public:
     virtual ~DhcpIpv6Client();
 
     bool IsRunning();
+    void SetLayer3(bool enabled)
+    {
+        layer3_ = enabled;
+        if (enabled) dhcpIpv6DnsRepository_ = std::make_unique<DnsServerRepository>(0, 4, 4);
+    }
     void SetCallback(std::function<void(const std::string ifname, DhcpIpv6Info &info)> callback);
     void SetRaFlagsCallback(std::function<void(const std::string ifname, bool managed, bool other)> callback);
     bool GetIpv6InfoSnapshot(DhcpIpv6Info &info);
@@ -79,6 +84,7 @@ private:
     void handleKernelEvent(const uint8_t* data, int len);
     void parseNdUserOptMessage(void* msg, int len);
     void ParseAddrMessage(void *msg);
+    bool ParseL3Address(void *msg);
     void ParseAddrAttributes(void *addrMsgptr, int32_t len, char *addresses, int &scope, bool &isTemporary);
     void NotifyRaFlagsChanged(bool managed, bool other);
     void parseRouteAttributes(void* rtMsgPtr, size_t size, char* dst, char* gateway, int& ifindex);
@@ -117,6 +123,7 @@ private:
     struct DhcpIpv6Info dhcpIpv6Info;
     int32_t ipv6SocketFd = -1;
     std::atomic<bool> runFlag_ { false };
+    bool layer3_{false};
     // IPv6 thread
     std::unique_ptr<std::thread> ipv6Thread_ = nullptr;
     // DNS repository

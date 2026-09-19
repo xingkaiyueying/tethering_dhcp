@@ -24,6 +24,7 @@ using std::atomic_store;
 #include <unistd.h>
 
 #include "dhcp_c_api.h"
+#include "nearlink_ipshare_client_c.h"
 
 #define WAIT_SECONDS 60
 #define CLIENT_ID_OPTION 61
@@ -31,6 +32,8 @@ using std::atomic_store;
 static atomic_int g_clientDone;
 static atomic_int g_clientPassed;
 static DhcpResult g_clientResult;
+static uint64_t g_ipv6Generation, g_ipv6Sequence;
+static DhcpL3Ipv6Snapshot g_ipv6Previous;
 
 #include "accesstoken_kit.h"
 #include "nativetoken_kit.h"
@@ -38,7 +41,8 @@ static DhcpResult g_clientResult;
 
 static int SetProbeToken(void)
 {
-    const char *permissions[] = { "ohos.permission.NETWORK_DHCP" };
+    const char *permissions[] = { "ohos.permission.NETWORK_DHCP", "ohos.permission.ACCESS_NEARLINK",
+        "ohos.permission.CONNECTIVITY_INTERNAL" };
     NativeTokenInfoParams info = {};
     info.permsNum = sizeof(permissions) / sizeof(permissions[0]);
     info.perms = permissions;
@@ -263,6 +267,12 @@ static void OnIpSuccess(int status, const char *ifname, DhcpResult *result)
 {
     DHCP_LOG("client success callback iface=%s status=%d result=%s", ifname == NULL ? "-" : ifname, status,
         result == NULL ? "null" : "present");
+    if (result != NULL && result->iptype == 1) {
+        printf("ipv6_dns_count=%u router=%s\n", result->dnsList.dnsNumber, result->strOptRouter1);
+        for (uint32_t i = 0; i < result->dnsList.dnsNumber && i < DHCP_DNS_MAX_NUMBER; ++i)
+            printf("rdnss=%s\n", result->dnsList.dnsAddr[i]);
+        return;
+    }
     if (result != NULL) {
         g_clientResult = *result;
         atomic_store(&g_clientPassed, result->isOptSuc && IsExpectedLease(result->strOptClientId));
@@ -332,18 +342,56 @@ static int RunServerStart(const char *ifname, const char *start, const char *end
     return ret == DHCP_SUCCESS ? 0 : 1;
 }
 
-static int RunClientStart(const char *ifname, const char *keyText)
+static int ApplyAddressEvidence(const DhcpL3Ipv6Address *address, bool remove)
+{
+    NlIpShareIpv6AddressC evidence{};
+    evidence.generation = g_ipv6Generation; evidence.sequence = ++g_ipv6Sequence;
+    snprintf(evidence.address, sizeof(evidence.address), "%s", address->address);
+    evidence.ifindex = address->ifindex; evidence.prefixLength = address->prefixLength; evidence.flags = address->flags;
+    evidence.preferredLifetime = remove ? 0 : address->preferredLifetime;
+    evidence.validLifetime = remove ? 0 : address->validLifetime;
+    int ret = NlIpShareUpdateValidatedAddress(&evidence);
+    printf("ipv6_local_evidence address=%s remove=%d generation=%llu sequence=%llu ret=%d\n",
+        evidence.address, remove, (unsigned long long)evidence.generation, (unsigned long long)evidence.sequence, ret);
+    return ret;
+}
+
+static void OnL3Ipv6(const char *iface, const DhcpL3Ipv6Snapshot *snapshot)
+{
+    for (uint32_t i = 0; i < g_ipv6Previous.addressCount; ++i) {
+        bool found = false;
+        for (uint32_t j = 0; j < snapshot->addressCount; ++j)
+            if (strcmp(g_ipv6Previous.addresses[i].address, snapshot->addresses[j].address) == 0) found = true;
+        if (!found) (void)ApplyAddressEvidence(&g_ipv6Previous.addresses[i], true);
+    }
+    printf("ipv6_snapshot iface=%s count=%u\n", iface, snapshot->addressCount);
+    for (uint32_t i = 0; i < snapshot->addressCount; ++i) {
+        const DhcpL3Ipv6Address *a = &snapshot->addresses[i];
+        (void)ApplyAddressEvidence(a, false);
+        printf("ipv6_address=%s/%u ifindex=%u flags=0x%x preferred=%u valid=%u\n",
+            a->address, a->prefixLength, a->ifindex, a->flags, a->preferredLifetime, a->validLifetime);
+    }
+    g_ipv6Previous = *snapshot;
+    fflush(stdout);
+}
+
+static int RunClientStart(const char *ifname, const char *keyText, bool dual)
 {
     DHCP_LOG("client flow begin iface=%s mode=L3_TUN", ifname);
     if (strcmp(ifname, "sleip0") != 0) {
         PrintResult(false, "CONFIG", -EINVAL);
         return 1;
     }
+    if (dual) {
+        NlIpShareStatusC status{};
+        if (NlIpShareGetStatus(&status) != 0 || status.state != 5 || status.role != 2 || status.selectedMode != 3) return 2;
+        g_ipv6Generation = status.generation; g_ipv6Sequence = 0; g_ipv6Previous = {};
+    }
     RouterConfig config = {};
     ClientCallBack callback = {OnIpSuccess, OnIpFail};
     snprintf(config.ifname, sizeof(config.ifname), "%s", ifname);
     config.bIpv4 = true;
-    config.bIpv6 = false;
+    config.bIpv6 = dual;
     config.prohibitUseCacheIp = true;
     uint8_t clientKey[DHCP_CLIENT_KEY_LEN] = {0};
     if (!ParseClientKey(keyText, clientKey)) {
@@ -354,13 +402,23 @@ static int RunClientStart(const char *ifname, const char *keyText)
     atomic_store(&g_clientPassed, 0);
     DhcpErrorCode ret = RegisterDhcpClientCallBack(ifname, &callback);
     DHCP_LOG("client callback registration iface=%s ret=%d", ifname, ret);
+    if (ret == DHCP_SUCCESS && dual) ret = RegisterDhcpClientL3Ipv6CallBack(ifname, OnL3Ipv6);
     if (ret == DHCP_SUCCESS) {
         ret = StartDhcpClientL3(&config, clientKey, sizeof(clientKey));
         DHCP_LOG("client start requested iface=%s ret=%d", ifname, ret);
     } else {
         DHCP_LOG("client flow exit before start: callback registration failed ret=%d", ret);
     }
-    for (int i = 0; ret == DHCP_SUCCESS && !atomic_load(&g_clientDone) && i < WAIT_SECONDS; ++i) {
+    bool policyInstalled = false;
+    for (int i = 0; ret == DHCP_SUCCESS && (dual || !atomic_load(&g_clientDone)) && i < (dual ? 180 : WAIT_SECONDS); ++i) {
+        if (dual && atomic_load(&g_clientPassed) && !policyInstalled) {
+            if (ConfigureTestPolicy(ifname, true) != 0) {
+                (void)StopDhcpClient(ifname, true, true);
+                ret = DHCP_FAILED;
+                break;
+            }
+            policyInstalled = true;
+        }
         sleep(1);
     }
     bool passed = ret == DHCP_SUCCESS && atomic_load(&g_clientPassed);
@@ -369,16 +427,17 @@ static int RunClientStart(const char *ifname, const char *keyText)
     } else if (ret == DHCP_SUCCESS && !atomic_load(&g_clientPassed)) {
         DHCP_LOG("client callback completed but lease validation failed");
     }
-    if (passed) {
+    if (passed && !policyInstalled) {
         int policyRet = ConfigureTestPolicy(ifname, true);
         if (policyRet != 0) {
-            DHCP_LOG("client rollback ret=%d", StopDhcpClient(ifname, false, true));
+            DHCP_LOG("client rollback ret=%d", StopDhcpClient(ifname, true, true));
             PrintResult(false, "ROUTE", policyRet);
             return 1;
         }
     }
     printf("lease=%s\n", passed ? g_clientResult.strOptClientId : "-");
-    PrintResult(passed, passed ? "BOUND" : "REQUEST", passed ? 0 : (ret == DHCP_SUCCESS ? -1 : ret));
+    if (dual) printf("ipv6_verdict=DEVICE_EVIDENCE_REQUIRED; snapshot observation ended\n");
+    PrintResult(passed, passed ? "BOUND_IPV4" : "REQUEST_IPV4", passed ? 0 : (ret == DHCP_SUCCESS ? -1 : ret));
     return passed ? 0 : 1;
 }
 
@@ -398,7 +457,7 @@ static int RunStatus(const char *ifname)
 static int RunStop(const char *ifname)
 {
     DHCP_LOG("stop flow begin iface=%s", ifname);
-    DhcpErrorCode clientRet = StopDhcpClient(ifname, false, true);
+    DhcpErrorCode clientRet = StopDhcpClient(ifname, true, true);
     DHCP_LOG("client stop complete iface=%s ret=%d", ifname, clientRet);
     DhcpErrorCode serverRet = StopDhcpServer(ifname);
     DHCP_LOG("server stop complete iface=%s ret=%d", ifname, serverRet);
@@ -417,7 +476,7 @@ static int RunStop(const char *ifname)
 static void Usage(const char *program)
 {
     fprintf(stderr, "usage: %s [--no-token] layout-check|server-start IFACE START END|"
-        "client-start IFACE KEY|status IFACE|stop IFACE\n", program);
+        "client-start IFACE KEY [dual]|status IFACE|stop IFACE\n", program);
 }
 
 int main(int argc, char *argv[])
@@ -438,7 +497,9 @@ int main(int argc, char *argv[])
     }
     if (argc == 2 && strcmp(argv[1], "layout-check") == 0) return RunLayoutCheck();
     if (argc == 5 && strcmp(argv[1], "server-start") == 0) return RunServerStart(argv[2], argv[3], argv[4]);
-    if (argc == 4 && strcmp(argv[1], "client-start") == 0) return RunClientStart(argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "client-start") == 0) return RunClientStart(argv[2], argv[3], false);
+    if (argc == 5 && strcmp(argv[1], "client-start") == 0 && strcmp(argv[4], "dual") == 0)
+        return RunClientStart(argv[2], argv[3], true);
     if (argc == 3 && strcmp(argv[1], "status") == 0) return RunStatus(argv[2]);
     if (argc == 3 && strcmp(argv[1], "stop") == 0) return RunStop(argv[2]);
     Usage(argv[0]);

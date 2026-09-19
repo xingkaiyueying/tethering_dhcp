@@ -26,6 +26,8 @@
 #include "dhcp_v6_constants.h"
 #endif
 #include <map>
+#include <algorithm>
+#include <chrono>
 
 namespace OHOS {
 namespace DHCP {
@@ -334,6 +336,11 @@ void DhcpIpv6Client::ParseAddrMessage(void *msg)
         return;
     }
     ifaddrmsg *addrMsg = reinterpret_cast<ifaddrmsg *>(NLMSG_DATA(hdrMsg));
+    if (addrMsg->ifa_family != AF_INET6 || addrMsg->ifa_index != if_nametoindex(interfaceName.c_str())) return;
+    if (layer3_) {
+        if (ParseL3Address(msg)) PublishIpv6Result();
+        return;
+    }
     char addresses[DHCP_INET6_ADDRSTRLEN];
     memset_s(addresses, DHCP_INET6_ADDRSTRLEN, 0, DHCP_INET6_ADDRSTRLEN);
     int scope = IPV6_ADDR_LINKLOCAL;
@@ -370,6 +377,58 @@ void DhcpIpv6Client::ParseAddrMessage(void *msg)
     OnIpv6AddressUpdateEvent(addresses, DHCP_INET6_ADDRSTRLEN, addrMsg->ifa_prefixlen, addrMsg->ifa_index,
         scope, nlType == RTM_NEWADDR);
     return;
+}
+
+bool DhcpIpv6Client::ParseL3Address(void *msg)
+{
+    auto header = static_cast<nlmsghdr *>(msg);
+    auto info = reinterpret_cast<ifaddrmsg *>(NLMSG_DATA(header));
+    L3Ipv6Address address;
+    address.observedAt = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    address.ifindex = info->ifa_index;
+    address.prefixLength = info->ifa_prefixlen;
+    address.flags = info->ifa_flags;
+    bool haveAddress = false, haveLifetime = false;
+    int length = IFA_PAYLOAD(header);
+    for (auto attr = IFA_RTA(info); RTA_OK(attr, length); attr = RTA_NEXT(attr, length)) {
+        if (attr->rta_type == IFA_ADDRESS) {
+            if (RTA_PAYLOAD(attr) != 16) return false;
+            char text[DHCP_INET6_ADDRSTRLEN]{};
+            if (GetIpFromS6Address(RTA_DATA(attr), AF_INET6, text, sizeof(text)) != 0) return false;
+            address.address = text; haveAddress = true;
+        } else if (attr->rta_type == IFA_CACHEINFO) {
+            if (static_cast<size_t>(RTA_PAYLOAD(attr)) < sizeof(ifa_cacheinfo)) return false;
+            ifa_cacheinfo cache{}; memcpy_s(&cache, sizeof(cache), RTA_DATA(attr), sizeof(cache));
+            address.preferredLifetime = cache.ifa_prefered; address.validLifetime = cache.ifa_valid;
+            haveLifetime = true;
+        } else if (attr->rta_type == IFA_FLAGS) {
+            if (RTA_PAYLOAD(attr) != sizeof(uint32_t)) return false;
+            memcpy_s(&address.flags, sizeof(address.flags), RTA_DATA(attr), sizeof(address.flags));
+        }
+    }
+    if (length != 0 || !haveAddress || address.prefixLength > 128 ||
+        (header->nlmsg_type == RTM_NEWADDR && (!haveLifetime || address.preferredLifetime > address.validLifetime)))
+        return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto &records = dhcpIpv6Info.l3Addresses;
+    auto found = std::find_if(records.begin(), records.end(), [&address](const L3Ipv6Address &a) {
+        return a.address == address.address;
+    });
+    if (header->nlmsg_type == RTM_DELADDR) {
+        if (found != records.end()) records.erase(found);
+        dhcpIpv6Info.IpAddrMap.erase(address.address);
+    } else {
+        if (found == records.end()) {
+            if (records.size() >= 8) return false;
+            records.push_back(address);
+        } else *found = address;
+        if ((address.flags & (IFA_F_TENTATIVE | IFA_F_DADFAILED)) == 0 && address.validLifetime != 0)
+            dhcpIpv6Info.IpAddrMap[address.address] = static_cast<int>(AddrType::GLOBAL);
+        else dhcpIpv6Info.IpAddrMap.erase(address.address);
+    }
+    dhcpIpv6Info.l3Ipv6 = true;
+    return true;
 }
 
 void DhcpIpv6Client::NotifyRaFlagsChanged(bool managed, bool other)

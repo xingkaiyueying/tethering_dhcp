@@ -14,6 +14,7 @@
  */
 
 #include "dhcp_client_service_impl.h"
+#include <chrono>
 #include "dhcp_common_utils.h"
 #ifndef OHOS_ARCH_LITE
 #include "dhcp_client_death_recipient.h"
@@ -334,10 +335,11 @@ ErrCode DhcpClientServiceImpl::StartOldClient(const RouterConfig &config, DhcpCl
             ret = StartNewIpv6Client(config, dhcpClient);
         } else {
 #ifndef OHOS_ARCH_LITE
-            NetManagerStandard::NetsysController::GetInstance().SetIpv6PrivacyExtensions(ifname, DHCP_IPV6_ENABLE);
+            if (config.linkMode != DhcpLinkMode::L3_TUN)
+                NetManagerStandard::NetsysController::GetInstance().SetIpv6PrivacyExtensions(ifname, DHCP_IPV6_ENABLE);
             NetManagerStandard::NetsysController::GetInstance().SetEnableIpv6(ifname, DHCP_IPV6_ENABLE);
 #endif
-            ret = StartSlaacClient(ifname, config.bIpv6, dhcpClient);
+            ret = StartSlaacClient(ifname, config.bIpv6, dhcpClient, config.linkMode == DhcpLinkMode::L3_TUN);
         }
     }
     if (ret != DHCP_E_SUCCESS) {
@@ -393,7 +395,7 @@ ErrCode DhcpClientServiceImpl::StartNewIpv4Client(const RouterConfig &config, Dh
 
 // Note: In this file, "ipv6" prefix refers to SLAAC (Stateless Address Autoconfiguration),
 // while "dhcpv6" prefix refers to DHCPv6 (Stateful DHCPv6).
-ErrCode DhcpClientServiceImpl::StartSlaacClient(const std::string &ifname, bool bIpv6, DhcpClient &client)
+ErrCode DhcpClientServiceImpl::StartSlaacClient(const std::string &ifname, bool bIpv6, DhcpClient &client, bool layer3)
 {
     if (client.pipv6Client == nullptr) {
         client.pipv6Client = new (std::nothrow)DhcpIpv6Client(ifname);
@@ -413,6 +415,7 @@ ErrCode DhcpClientServiceImpl::StartSlaacClient(const std::string &ifname, bool 
 
     client.pipv6Client->SetCallback(
         [this](const std::string ifname, DhcpIpv6Info &info) { this->DhcpIpv6ResulCallback(ifname, info); });
+    client.pipv6Client->SetLayer3(layer3);
 #if DHCPV6_ENABLE
     // Set callback for RA flags change to dynamically manage DHCPv6 client
     client.pipv6Client->SetRaFlagsCallback(
@@ -557,12 +560,14 @@ ErrCode DhcpClientServiceImpl::StartNewIpv6Client(const RouterConfig &config, Dh
 
 #ifndef OHOS_ARCH_LITE
     // Enable IPv6
-    NetManagerStandard::NetsysController::GetInstance().SetIpv6PrivacyExtensions(ifname, DHCP_IPV6_ENABLE);
+    if (config.linkMode != DhcpLinkMode::L3_TUN) {
+        NetManagerStandard::NetsysController::GetInstance().SetIpv6PrivacyExtensions(ifname, DHCP_IPV6_ENABLE);
+    }
     NetManagerStandard::NetsysController::GetInstance().SetEnableIpv6(ifname, DHCP_IPV6_ENABLE);
 
     // Start SLAAC client - M/O will be retrieved via RTM_GETLINK/RTM_NEWLINK
     // DHCPv6 client will be started/stopped dynamically based on M/O changes
-    return StartSlaacClient(ifname, config.bIpv6, client);
+    return StartSlaacClient(ifname, config.bIpv6, client, config.linkMode == DhcpLinkMode::L3_TUN);
 #else
     // OHOS_ARCH_LITE version - always use SLAAC (no RA-based decision)
     DhcpIpv6Client *pipv6Client = new (std::nothrow)DhcpIpv6Client(ifname);
@@ -961,6 +966,17 @@ void DhcpClientServiceImpl::FillDhcpResultFromIpv6Info(DhcpResult& result, const
         result.vectorDnsAddr.push_back(dnsAddr);
     }
     result.raFlags = info.raFlags;
+    result.l3Ipv6 = info.l3Ipv6;
+    result.l3Addresses = info.l3Addresses;
+    uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    for (auto &address : result.l3Addresses) {
+        uint64_t elapsed = now > address.observedAt ? now - address.observedAt : 0;
+        auto remaining = [elapsed](uint32_t life) -> uint32_t {
+            return life == UINT32_MAX ? life : (elapsed >= life ? 0 : life - elapsed);
+        };
+        address.preferredLifetime = remaining(address.preferredLifetime);
+        address.validLifetime = remaining(address.validLifetime);
+    }
 }
 
 void DhcpClientServiceImpl::DhcpIpv6ResulCallback(const std::string ifname, DhcpIpv6Info& info)
