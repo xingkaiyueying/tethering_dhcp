@@ -10,6 +10,8 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <atomic>
+#include <deque>
+#include <mutex>
 using std::atomic_int;
 using std::atomic_load;
 using std::atomic_store;
@@ -28,12 +30,16 @@ using std::atomic_store;
 
 #define WAIT_SECONDS 60
 #define CLIENT_ID_OPTION 61
+constexpr size_t IPV6_SNAPSHOT_QUEUE_LIMIT = 256;
 
 static atomic_int g_clientDone;
 static atomic_int g_clientPassed;
 static DhcpResult g_clientResult;
 static uint64_t g_ipv6Generation, g_ipv6Sequence;
 static DhcpL3Ipv6Snapshot g_ipv6Previous;
+static std::mutex g_ipv6Mutex;
+static std::deque<DhcpL3Ipv6Snapshot> g_ipv6Pending;
+static atomic_int g_ipv6QueueOverflow;
 
 #include "accesstoken_kit.h"
 #include "nativetoken_kit.h"
@@ -356,7 +362,7 @@ static int ApplyAddressEvidence(const DhcpL3Ipv6Address *address, bool remove)
     return ret;
 }
 
-static void OnL3Ipv6(const char *iface, const DhcpL3Ipv6Snapshot *snapshot)
+static void ProcessL3Ipv6Snapshot(const DhcpL3Ipv6Snapshot *snapshot)
 {
     for (uint32_t i = 0; i < g_ipv6Previous.addressCount; ++i) {
         bool found = false;
@@ -364,7 +370,7 @@ static void OnL3Ipv6(const char *iface, const DhcpL3Ipv6Snapshot *snapshot)
             if (strcmp(g_ipv6Previous.addresses[i].address, snapshot->addresses[j].address) == 0) found = true;
         if (!found) (void)ApplyAddressEvidence(&g_ipv6Previous.addresses[i], true);
     }
-    printf("ipv6_snapshot iface=%s count=%u\n", iface, snapshot->addressCount);
+    printf("ipv6_snapshot iface=sleip0 count=%u\n", snapshot->addressCount);
     for (uint32_t i = 0; i < snapshot->addressCount; ++i) {
         const DhcpL3Ipv6Address *a = &snapshot->addresses[i];
         (void)ApplyAddressEvidence(a, false);
@@ -373,6 +379,27 @@ static void OnL3Ipv6(const char *iface, const DhcpL3Ipv6Snapshot *snapshot)
     }
     g_ipv6Previous = *snapshot;
     fflush(stdout);
+}
+
+static void OnL3Ipv6(const char *iface, const DhcpL3Ipv6Snapshot *snapshot)
+{
+    if (iface == NULL || strcmp(iface, "sleip0") != 0 || snapshot == NULL) return;
+    std::lock_guard<std::mutex> lock(g_ipv6Mutex);
+    if (g_ipv6Pending.size() >= IPV6_SNAPSHOT_QUEUE_LIMIT) {
+        atomic_store(&g_ipv6QueueOverflow, 1);
+        return;
+    }
+    g_ipv6Pending.push_back(*snapshot);
+}
+
+static void DrainL3Ipv6Snapshots(void)
+{
+    std::deque<DhcpL3Ipv6Snapshot> pending;
+    {
+        std::lock_guard<std::mutex> lock(g_ipv6Mutex);
+        pending.swap(g_ipv6Pending);
+    }
+    for (const auto &snapshot : pending) ProcessL3Ipv6Snapshot(&snapshot);
 }
 
 static int RunClientStart(const char *ifname, const char *keyText, bool dual)
@@ -386,6 +413,9 @@ static int RunClientStart(const char *ifname, const char *keyText, bool dual)
         NlIpShareStatusC status{};
         if (NlIpShareGetStatus(&status) != 0 || status.state != 5 || status.role != 2 || status.selectedMode != 3) return 2;
         g_ipv6Generation = status.generation; g_ipv6Sequence = 0; g_ipv6Previous = {};
+        atomic_store(&g_ipv6QueueOverflow, 0);
+        std::lock_guard<std::mutex> lock(g_ipv6Mutex);
+        g_ipv6Pending.clear();
     }
     RouterConfig config = {};
     ClientCallBack callback = {OnIpSuccess, OnIpFail};
@@ -411,6 +441,7 @@ static int RunClientStart(const char *ifname, const char *keyText, bool dual)
     }
     bool policyInstalled = false;
     for (int i = 0; ret == DHCP_SUCCESS && (dual || !atomic_load(&g_clientDone)) && i < (dual ? 180 : WAIT_SECONDS); ++i) {
+        if (dual) DrainL3Ipv6Snapshots();
         if (dual && atomic_load(&g_clientPassed) && !policyInstalled) {
             if (ConfigureTestPolicy(ifname, true) != 0) {
                 (void)StopDhcpClient(ifname, true, true);
@@ -421,6 +452,8 @@ static int RunClientStart(const char *ifname, const char *keyText, bool dual)
         }
         sleep(1);
     }
+    if (dual) DrainL3Ipv6Snapshots();
+    if (dual && atomic_load(&g_ipv6QueueOverflow)) DHCP_LOG("IPv6 snapshot queue overflowed");
     bool passed = ret == DHCP_SUCCESS && atomic_load(&g_clientPassed);
     if (ret == DHCP_SUCCESS && !atomic_load(&g_clientDone)) {
         DHCP_LOG("client lease wait timed out after %d seconds", WAIT_SECONDS);

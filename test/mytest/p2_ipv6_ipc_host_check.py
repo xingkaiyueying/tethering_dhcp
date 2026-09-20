@@ -16,6 +16,15 @@ def block(path, signature):
         right += 1
     return text[start:right]
 
+probe = (repo / 'test/mytest/sleip_dhcp_stage2.c').read_text(encoding='utf-8')
+callback = block('test/mytest/sleip_dhcp_stage2.c', 'static void OnL3Ipv6')
+drain = block('test/mytest/sleip_dhcp_stage2.c', 'static void DrainL3Ipv6Snapshots')
+assert 'NlIpShareUpdateValidatedAddress' not in callback
+assert 'g_ipv6Pending.push_back' in callback
+assert 'ProcessL3Ipv6Snapshot' in drain
+assert 'DrainL3Ipv6Snapshots();' in probe
+print('DHCP probe IPC identity: callback queues snapshots and caller thread drains evidence PASS')
+
 types = 'interfaces/inner_api/include/dhcp_define.h'
 code = r'''
 #include <cstdint>
