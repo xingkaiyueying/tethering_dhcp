@@ -57,6 +57,7 @@
                 "init",
                 "ipc",
                 "netmanager_base",
+                "nearlink_service",
                 "safwk",
                 "access_token",
                 "samgr",
