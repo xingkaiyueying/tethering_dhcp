@@ -762,9 +762,9 @@ bool DhcpServerServiceImpl::CheckIpAddrRange(const DhcpRange &range)
                 range.iptype, range.strEndip.c_str());
             return false;
         }
-        /* check ip4 start and end ip */
-        if (uStartIp >= uEndIp) {
-            DHCP_LOGE("CheckIpAddrRange failed, start:%{private}u not less end:%{private}u!", uStartIp, uEndIp);
+        /* A one-address pool is valid; reject only a reversed range. */
+        if (uStartIp > uEndIp) {
+            DHCP_LOGE("CheckIpAddrRange failed, start:%{private}u greater than end:%{private}u!", uStartIp, uEndIp);
             return false;
         }
     } else {
