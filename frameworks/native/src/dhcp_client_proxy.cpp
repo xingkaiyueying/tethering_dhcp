@@ -110,16 +110,13 @@ ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
     }
     data.WriteInt32(0);
 
-    if (g_dhcpClientCallBackStub == nullptr) {
-        DHCP_LOGE("[DHCP][ClientProxy] register callback failed: callback stub is null");
-        return DHCP_E_FAILED;
-    }
-    g_dhcpClientCallBackStub->RegisterCallBack(callback);
-
-    if (!data.WriteRemoteObject(g_dhcpClientCallBackStub->AsObject())) {
-        DHCP_LOGE("[DHCP][ClientProxy] register callback failed: write remote callback");
-        return DHCP_E_FAILED;
-    }
+    // A reused stub can deliver an old Binder message to a replacement callback.
+    // Isolate the explicit Demo interface; unrelated DHCP clients retain the existing path.
+    sptr<DhcpClientCallBackStub> callbackStub = ifname == "sleip0"
+        ? sptr<DhcpClientCallBackStub>(new (std::nothrow) DhcpClientCallBackStub()) : g_dhcpClientCallBackStub;
+    if (callbackStub == nullptr) return DHCP_E_FAILED;
+    callbackStub->RegisterCallBack(callback);
+    if (!data.WriteRemoteObject(callbackStub->AsObject())) return DHCP_E_FAILED;
 
     data.WriteString(ifname);
     DHCP_LOGI("%{public}s, calling uid:%{public}d, ifname:%{public}s", __func__, GetCallingUid(), ifname.c_str());

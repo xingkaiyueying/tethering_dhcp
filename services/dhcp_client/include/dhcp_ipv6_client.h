@@ -37,6 +37,7 @@ public:
     virtual ~DhcpIpv6Client();
 
     bool IsRunning();
+    bool IsLayer3() const { return layer3_; }
     void SetLayer3(bool enabled)
     {
         layer3_ = enabled;

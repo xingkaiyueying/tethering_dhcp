@@ -70,6 +70,24 @@ NO_SANITIZE("cfi")  DhcpErrorCode RegisterDhcpClientCallBack(const char *ifname,
     return ret;
 }
 
+NO_SANITIZE("cfi") DhcpErrorCode RegisterDhcpClientL3Session(const char *ifname, uint64_t generation,
+    void (*success)(uint64_t, int, const char *, const DhcpResult *, const DhcpL3Ipv6Snapshot *),
+    void (*failure)(uint64_t, int, const char *, const char *))
+{
+    if (!ifname || strcmp(ifname, "sleip0") != 0 || !generation || !success || !failure) return DHCP_INVALID_PARAM;
+#ifdef OHOS_ARCH_LITE
+    return DHCP_INVALID_PARAM;
+#else
+    if (!dhcpClientPtr) dhcpClientPtr = OHOS::DHCP::DhcpClient::GetInstance(DHCP_CLIENT_ABILITY_ID);
+    if (!dhcpClientPtr) return DHCP_INVALID_PARAM;
+    OHOS::sptr<DhcpClientCallBack> callback = new (std::nothrow) DhcpClientCallBack();
+    if (!callback) return DHCP_INVALID_PARAM;
+    callback->sessionGeneration = generation;
+    callback->sessionSuccess = success; callback->sessionFailure = failure;
+    return GetCErrorCode(dhcpClientPtr->RegisterDhcpClientCallBack(ifname, callback));
+#endif
+}
+
 DhcpErrorCode RegisterDhcpClientReportCallBack(const char *ifname, const DhcpClientReport *event)
 {
     CHECK_PTR_RETURN(ifname, DHCP_INVALID_PARAM);

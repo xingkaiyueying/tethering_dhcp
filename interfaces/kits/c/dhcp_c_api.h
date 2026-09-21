@@ -55,6 +55,11 @@ extern "C" {
     /* Private L3 TUN entry; RouterConfig and StartDhcpClient retain their original L2 ABI. */
     DhcpErrorCode StartDhcpClientL3(const RouterConfig *config, const uint8_t *clientKey, uint32_t keyLength);
     /* Register before StartDhcpClientL3; nullptr unregisters. Snapshot is valid only during the callback. */
+    /* Demo session callback: each registration gets a distinct Binder target. */
+    DhcpErrorCode RegisterDhcpClientL3Session(const char *ifname, uint64_t generation,
+        void (*success)(uint64_t, int, const char *, const DhcpResult *, const DhcpL3Ipv6Snapshot *),
+        void (*failure)(uint64_t, int, const char *, const char *));
+
     DhcpErrorCode RegisterDhcpClientL3Ipv6CallBack(const char *ifname,
         void (*callback)(const char *, const DhcpL3Ipv6Snapshot *));
 

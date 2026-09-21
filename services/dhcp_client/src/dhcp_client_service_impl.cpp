@@ -1229,6 +1229,12 @@ void DhcpClientServiceImpl::ReportDhcpV6FailureCallback(
         }
         callbackCopy = iter->second;
     }
+    {
+        std::lock_guard<std::mutex> lock(m_clientServiceMutex);
+        auto client = m_mapClientService.find(ifname);
+        if (client != m_mapClientService.end() && client->second.pipv6Client && client->second.pipv6Client->IsLayer3())
+            status |= 0x10000; // Private L3 IPv6 failure source; public L2 callbacks are unchanged.
+    }
     callbackCopy->OnIpFailChanged(status, ifname.c_str(), reason);
     DHCP_LOGI("ReportDhcpV6FailureCallback OnIpFailChanged ifname:%{public}s status:%{public}d",
         ifname.c_str(), status);

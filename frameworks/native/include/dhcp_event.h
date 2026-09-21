@@ -48,6 +48,9 @@ public:
     void ResultInfoCopyExt(DhcpResult &dhcpResult, OHOS::DHCP::DhcpResult& result);
     std::mutex callBackMutex;
     std::map<std::string, const ClientCallBack *> mapClientCallBack;
+    uint64_t sessionGeneration{0};
+    void (*sessionSuccess)(uint64_t, int, const char *, const DhcpResult *, const DhcpL3Ipv6Snapshot *){nullptr};
+    void (*sessionFailure)(uint64_t, int, const char *, const char *){nullptr};
     using L3Callback = void (*)(const char *, const DhcpL3Ipv6Snapshot *);
     std::map<std::string, L3Callback> l3Callbacks;
     std::mutex mapReportMutex_;
