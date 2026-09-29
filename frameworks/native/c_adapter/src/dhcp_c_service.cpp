@@ -12,13 +12,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <algorithm>
 #include "kits/c/dhcp_c_api.h"
 #include "inner_api/dhcp_client.h"
 #include "inner_api/dhcp_server.h"
 #include "dhcp_sdk_define.h"
 #include "dhcp_c_utils.h"
 #include "dhcp_event.h"
+#include "dhcp_l3_client_internal.h"
 #include "dhcp_logger.h"
 #ifndef OHOS_ARCH_LITE
 #include <string_ex.h>
@@ -121,11 +121,8 @@ NO_SANITIZE("cfi") static DhcpErrorCode StartDhcpClientWithMode(const RouterConf
     routerConfig.bSpecificNetwork = config.bSpecificNetwork;
     routerConfig.isStaticIpv4 = config.isStaticIpv4;
     routerConfig.bIpv4 = config.bIpv4;
-    if (clientKey != nullptr) {
-        routerConfig.linkMode = OHOS::DHCP::DhcpLinkMode::L3_TUN;
-        std::copy(clientKey, clientKey + DHCP_CLIENT_KEY_LEN, routerConfig.clientKey.begin());
-    }
-    DhcpErrorCode ret = GetCErrorCode(dhcpClientPtr->StartDhcpClient(routerConfig));
+    DhcpErrorCode ret = GetCErrorCode(clientKey == nullptr ? dhcpClientPtr->StartDhcpClient(routerConfig) :
+        OHOS::DHCP::StartDhcpClientL3Internal(routerConfig, clientKey, DHCP_CLIENT_KEY_LEN));
     if (ret != DHCP_SUCCESS) {
         DHCP_LOGE("[DHCP][CAdapter] start failed, ifname:%{public}s ret:%{public}d", config.ifname, ret);
     } else {

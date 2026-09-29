@@ -336,9 +336,13 @@ void DhcpIpv6Client::ParseAddrMessage(void *msg)
         return;
     }
     ifaddrmsg *addrMsg = reinterpret_cast<ifaddrmsg *>(NLMSG_DATA(hdrMsg));
-    if (addrMsg->ifa_family != AF_INET6 || addrMsg->ifa_index != if_nametoindex(interfaceName.c_str())) return;
+    if (addrMsg->ifa_family != AF_INET6 || addrMsg->ifa_index != if_nametoindex(interfaceName.c_str())) {
+        return;
+    }
     if (layer3_) {
-        if (ParseL3Address(msg)) PublishIpv6Result();
+        if (ParseL3Address(msg)) {
+            PublishIpv6Result();
+        }
         return;
     }
     char addresses[DHCP_INET6_ADDRSTRLEN];
@@ -393,39 +397,59 @@ bool DhcpIpv6Client::ParseL3Address(void *msg)
     int length = IFA_PAYLOAD(header);
     for (auto attr = IFA_RTA(info); RTA_OK(attr, length); attr = RTA_NEXT(attr, length)) {
         if (attr->rta_type == IFA_ADDRESS) {
-            if (RTA_PAYLOAD(attr) != 16) return false;
+            if (RTA_PAYLOAD(attr) != 16) {
+                return false;
+            }
             char text[DHCP_INET6_ADDRSTRLEN]{};
-            if (GetIpFromS6Address(RTA_DATA(attr), AF_INET6, text, sizeof(text)) != 0) return false;
-            address.address = text; haveAddress = true;
+            if (GetIpFromS6Address(RTA_DATA(attr), AF_INET6, text, sizeof(text)) != 0) {
+                return false;
+            }
+            address.address = text;
+            haveAddress = true;
         } else if (attr->rta_type == IFA_CACHEINFO) {
-            if (static_cast<size_t>(RTA_PAYLOAD(attr)) < sizeof(ifa_cacheinfo)) return false;
-            ifa_cacheinfo cache{}; memcpy_s(&cache, sizeof(cache), RTA_DATA(attr), sizeof(cache));
-            address.preferredLifetime = cache.ifa_prefered; address.validLifetime = cache.ifa_valid;
+            if (static_cast<size_t>(RTA_PAYLOAD(attr)) < sizeof(ifa_cacheinfo)) {
+                return false;
+            }
+            ifa_cacheinfo cache{};
+            memcpy_s(&cache, sizeof(cache), RTA_DATA(attr), sizeof(cache));
+            address.preferredLifetime = cache.ifa_prefered;
+            address.validLifetime = cache.ifa_valid;
             haveLifetime = true;
         } else if (attr->rta_type == IFA_FLAGS) {
-            if (RTA_PAYLOAD(attr) != sizeof(uint32_t)) return false;
+            if (RTA_PAYLOAD(attr) != sizeof(uint32_t)) {
+                return false;
+            }
             memcpy_s(&address.flags, sizeof(address.flags), RTA_DATA(attr), sizeof(address.flags));
         }
     }
     if (length != 0 || !haveAddress || address.prefixLength > 128 ||
-        (header->nlmsg_type == RTM_NEWADDR && (!haveLifetime || address.preferredLifetime > address.validLifetime)))
+        (header->nlmsg_type == RTM_NEWADDR && (!haveLifetime || address.preferredLifetime > address.validLifetime))) {
         return false;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     auto &records = dhcpIpv6Info.l3Addresses;
     auto found = std::find_if(records.begin(), records.end(), [&address](const L3Ipv6Address &a) {
         return a.address == address.address;
     });
     if (header->nlmsg_type == RTM_DELADDR) {
-        if (found != records.end()) records.erase(found);
+        if (found != records.end()) {
+            records.erase(found);
+        }
         dhcpIpv6Info.IpAddrMap.erase(address.address);
     } else {
         if (found == records.end()) {
-            if (records.size() >= 8) return false;
+            if (records.size() >= 8) {
+                return false;
+            }
             records.push_back(address);
-        } else *found = address;
-        if ((address.flags & (IFA_F_TENTATIVE | IFA_F_DADFAILED)) == 0 && address.validLifetime != 0)
+        } else {
+            *found = address;
+        }
+        if ((address.flags & (IFA_F_TENTATIVE | IFA_F_DADFAILED)) == 0 && address.validLifetime != 0) {
             dhcpIpv6Info.IpAddrMap[address.address] = static_cast<int>(AddrType::GLOBAL);
-        else dhcpIpv6Info.IpAddrMap.erase(address.address);
+        } else {
+            dhcpIpv6Info.IpAddrMap.erase(address.address);
+        }
     }
     dhcpIpv6Info.l3Ipv6 = true;
     return true;

@@ -12,6 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <algorithm>
 #include "dhcp_client_impl.h"
 #include "i_dhcp_client.h"
 #include "dhcp_client_proxy.h"
@@ -27,6 +28,21 @@ DEFINE_DHCPLOG_DHCP_LABEL("DhcpClientImpl");
 
 namespace OHOS {
 namespace DHCP {
+namespace {
+RouterConfig CopyLegacyRouterConfig(const RouterConfig &config)
+{
+    RouterConfig safe;
+    safe.ifname = config.ifname;
+    safe.bssid = config.bssid;
+    safe.prohibitUseCacheIp = config.prohibitUseCacheIp;
+    safe.bIpv6 = config.bIpv6;
+    safe.bSpecificNetwork = config.bSpecificNetwork;
+    safe.isStaticIpv4 = config.isStaticIpv4;
+    safe.bIpv4 = config.bIpv4;
+    return safe;
+}
+} // namespace
+
 #define RETURN_IF_FAIL(cond)                          \
     do {                                              \
         if (!(cond)) {                                \
@@ -129,7 +145,20 @@ ErrCode DhcpClientImpl::StartDhcpClient(const RouterConfig &config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     RETURN_IF_FAIL(GetDhcpClientProxy());
-    return client_->StartDhcpClient(config);
+    return client_->StartDhcpClient(CopyLegacyRouterConfig(config));
+}
+
+ErrCode DhcpClientImpl::StartDhcpClientL3(const RouterConfig &config, const uint8_t *clientKey, uint32_t keyLength)
+{
+    if (clientKey == nullptr || keyLength != ETH_MAC_ADDR_LEN) {
+        return DHCP_E_FAILED;
+    }
+    RouterConfig safe = CopyLegacyRouterConfig(config);
+    safe.linkMode = DhcpLinkMode::L3_TUN;
+    std::copy(clientKey, clientKey + keyLength, safe.clientKey.begin());
+    std::lock_guard<std::mutex> lock(mutex_);
+    RETURN_IF_FAIL(GetDhcpClientProxy());
+    return client_->StartDhcpClient(safe);
 }
 
 ErrCode DhcpClientImpl::DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)
