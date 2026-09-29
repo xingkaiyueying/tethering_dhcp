@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <net/if.h>
+#include <linux/rtnetlink.h>
 #include <errno.h>
 #include <fstream>
 #include <thread>
@@ -669,6 +670,11 @@ int DhcpIpv6Client::SendRouterSolicitation()
     }
 
     struct nd_router_solicit rs;
+    int hopLimit = 255;
+    if (setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hopLimit, sizeof(hopLimit)) < 0) {
+        close(sock);
+        return -1;
+    }
     memset_s(&rs, sizeof(rs), 0, sizeof(rs));
     rs.nd_rs_type = ND_ROUTER_SOLICIT;
     rs.nd_rs_code = 0;
@@ -724,6 +730,16 @@ int DhcpIpv6Client::StartIpv6()
         }
     }
     uint8_t *buff = (uint8_t*)malloc(KERNEL_BUFF_SIZE * sizeof(uint8_t));
+    if (layer3_) {
+        struct { nlmsghdr header; ifaddrmsg address; } request{};
+        request.header.nlmsg_len = NLMSG_LENGTH(sizeof(ifaddrmsg));
+        request.header.nlmsg_type = RTM_GETADDR;
+        request.header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+        request.header.nlmsg_seq = 1;
+        request.address.ifa_family = AF_INET6;
+        (void)send(ipv6SocketFd, &request, request.header.nlmsg_len, 0);
+        (void)SendRouterSolicitation();
+    }
     if (buff == NULL) {
         std::lock_guard<std::mutex> lock(mutex_);
         DHCP_LOGE("StartIpv6 ipv6 malloc buff failed.");
@@ -737,6 +753,15 @@ int DhcpIpv6Client::StartIpv6()
     timeout.tv_sec = 0;
     timeout.tv_usec = SELECT_TIMEOUT_US;
     while (runFlag_.load()) {
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        if (layer3_ && dhcpIpv6DnsRepository_ && dhcpIpv6DnsRepository_->Expire()) {
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                dhcpIpv6DnsRepository_->SetCurrentServers(dhcpIpv6Info);
+            }
+            PublishIpv6Result();
+        }
         errno_t err = memset_s(buff, KERNEL_BUFF_SIZE * sizeof(uint8_t), 0, KERNEL_BUFF_SIZE * sizeof(uint8_t));
         if (err != EOK) {
             DHCP_LOGE("memset_s buff failed, err=%{public}d", err);
@@ -885,6 +910,7 @@ void DhcpIpv6Client::PublishIpv6Result()
         std::lock_guard<std::mutex> lock(mutex_);
         ifname = interfaceName;
         info = dhcpIpv6Info;
+        info.l3Ipv6 = layer3_;
         DHCP_LOGI("PublishIpv6Result: ifname %{public}s, status %{public}u", ifname.c_str(), info.status);
     }
     {

@@ -53,7 +53,7 @@ private:
     static const int DEFAULT_IPC_SIZE = 256;
 #else
     static inline BrokerDelegator<DhcpClientCallbackProxy> g_delegator;
-    void WriteDhcpResult(const DhcpResult& result, MessageParcel &data);
+    bool WriteDhcpResult(const DhcpResult& result, MessageParcel &data);
 #endif
 };
 }  // namespace DHCP

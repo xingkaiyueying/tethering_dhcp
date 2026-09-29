@@ -20,6 +20,7 @@ ohos_executable("sleip_dhcp_stage2") {
   include_dirs = [ "../../interfaces/kits/c" ]
   deps = [ ":probe_cpp_source", "//foundation/communication/dhcp/frameworks/native:dhcp_sdk" ]
   external_deps = [
+    "nearlink_service:nearlink_framework",
     "access_token:libaccesstoken_sdk",
     "access_token:libnativetoken",
     "access_token:libtoken_setproc",

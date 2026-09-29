@@ -20,6 +20,7 @@
 #include <vector>
 #include <map>
 #include "securec.h"
+#include "dhcp_define.h"
 namespace OHOS {
 namespace DHCP {
 inline const int DHCP_INET6_ADDRSTRLEN = 128;
@@ -65,6 +66,8 @@ struct DhcpIpv6Info {
     uint32_t tempPreferredLifetime {IPV6_LIFETIME_INFINITY};
     // Bit 0: managed flag (M), Bit 1: other flag (O)
     uint8_t raFlags { 0 };
+    bool l3Ipv6{false};
+    std::vector<L3Ipv6Address> l3Addresses;
     void Clear()
     {
         memset_s(linkIpv6Addr, DHCP_INET6_ADDRSTRLEN, 0, DHCP_INET6_ADDRSTRLEN);
@@ -86,6 +89,7 @@ struct DhcpIpv6Info {
         tempPreferredLifetime = IPV6_LIFETIME_INFINITY;
         defaultRouteAddr.clear();
         IpAddrMap.clear();
+        l3Addresses.clear();
     }
 };
 

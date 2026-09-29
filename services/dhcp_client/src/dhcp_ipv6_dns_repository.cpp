@@ -20,11 +20,13 @@ namespace DHCP {
 DEFINE_DHCPLOG_DHCP_LABEL("DnsServerRepository");
 const int FIRST_DNS_SERVER = 0;
 const int SECOND_DNS_SERVER = 1;
-DnsServerRepository::DnsServerRepository(int minLifeTime)
+DnsServerRepository::DnsServerRepository(int minLifeTime, size_t currentLimit, size_t allLimit)
 {
     currentServers_ = std::unordered_set<std::string>();
     allServers_ = std::vector<DnsServerEntry>();
     minLifetime_ = static_cast<uint32_t>(minLifeTime);
+    currentLimit_ = currentLimit;
+    allLimit_ = allLimit;
 }
 
 DnsServerRepository::~DnsServerRepository()
@@ -39,6 +41,12 @@ bool DnsServerRepository::Clear()
     return true;
 }
 
+bool DnsServerRepository::Expire()
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    return UpdateCurrentServers();
+}
+
 bool DnsServerRepository::AddServers(uint32_t lifetime, const std::vector<std::string>& addresses)
 {
     std::lock_guard<std::mutex> lock(mutex);
@@ -49,10 +57,10 @@ bool DnsServerRepository::AddServers(uint32_t lifetime, const std::vector<std::s
     }
 
     uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
+        std::chrono::steady_clock::now().time_since_epoch()
     ).count());
 
-    uint64_t expiry = now + static_cast<uint64_t>(lifetime) * 1000; // to ms
+    uint64_t expiry = lifetime == UINT32_MAX ? UINT64_MAX : now + static_cast<uint64_t>(lifetime) * 1000;
 
     for (const std::string& addressString : addresses) {
         //if exsiting, update expiry time
@@ -123,7 +131,7 @@ bool DnsServerRepository::UpdateExistingEntry(const std::string& address, uint64
 bool DnsServerRepository::UpdateCurrentServers()
 {
     uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
+        std::chrono::steady_clock::now().time_since_epoch()
     ).count());
 
     bool changed = false;
@@ -132,7 +140,7 @@ bool DnsServerRepository::UpdateCurrentServers()
     }
     for (int i = static_cast<int>(allServers_.size()) - 1; i >= 0; --i) {
         DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() %{public}d", i);
-        if (i >= NUM_SERVERS || allServers_[i].expiry <= now) {
+        if (static_cast<size_t>(i) >= allLimit_ || allServers_[i].expiry <= now) {
             DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() remove server %{private}s", allServers_[i].address.c_str());
             // remove expired or too many servers
             const std::string address = allServers_[i].address;  // Copy, not reference
@@ -146,7 +154,7 @@ bool DnsServerRepository::UpdateCurrentServers()
     }
 
     for (const DnsServerEntry& entry : allServers_) {
-        if (currentServers_.size() < NUM_CURRENT_SERVERS) {
+        if (currentServers_.size() < currentLimit_) {
             DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() add server %{private}s", entry.address.c_str());
             if (currentServers_.insert(entry.address).second) {
                 changed = true;

@@ -31,11 +31,15 @@ private:
     std::vector<DnsServerEntry> allServers_;          // all existing server
     uint32_t minLifetime_ = DEFAULT_MIN_RDNSS_LIFETIME;
     std::mutex mutex;
+    size_t currentLimit_ = NUM_CURRENT_SERVERS;
+    size_t allLimit_ = NUM_SERVERS;
 
 public:
-    DnsServerRepository(int minLifeTime = DEFAULT_MIN_RDNSS_LIFETIME);
+    DnsServerRepository(int minLifeTime = DEFAULT_MIN_RDNSS_LIFETIME,
+        size_t currentLimit = NUM_CURRENT_SERVERS, size_t allLimit = NUM_SERVERS);
     ~DnsServerRepository();
     bool Clear(); // clear all dns server info
+    bool Expire();
     bool AddServers(uint32_t lifetime, const std::vector<std::string>& addresses);  // add new dns server info
     bool SetCurrentServers(DhcpIpv6Info &ipv6Info); //set current servers to ipv6Info
 private:

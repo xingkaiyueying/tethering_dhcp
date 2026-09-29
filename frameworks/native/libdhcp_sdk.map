@@ -5,6 +5,8 @@
         "RegisterDhcpClientReportCallBack";
         "StartDhcpClient";
         "StartDhcpClientL3";
+        "RegisterDhcpClientL3Ipv6CallBack";
+        "RegisterDhcpClientL3Session";
         "SetConfiguration";
         "StartDhcpClient";
         "StopDhcpClient";

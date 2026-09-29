@@ -113,6 +113,9 @@ HWTEST_F(DhcpServerServiceTest, DhcpServerService_Test5, TestSize.Level1)
     checkRange.strStartip = "192.168.0.49";
     checkRange.strEndip = "192.168.1";
     EXPECT_EQ(false, pServerServiceImpl->CheckIpAddrRange(checkRange));
+    checkRange.strStartip = "192.168.0.2";
+    checkRange.strEndip = "192.168.0.2";
+    EXPECT_EQ(true, pServerServiceImpl->CheckIpAddrRange(checkRange));
     checkRange.strEndip = "192.168.0.1";
     EXPECT_EQ(false, pServerServiceImpl->CheckIpAddrRange(checkRange));
 

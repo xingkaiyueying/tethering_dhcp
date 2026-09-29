@@ -72,7 +72,7 @@ public:
     bool IsRemoteDied(void) override;
     ErrCode StartNewIpv4Client(const RouterConfig &config, DhcpClient &dhcpClient);
     ErrCode StartNewIpv6Client(const RouterConfig &config, DhcpClient &dhcpClient);
-    ErrCode StartSlaacClient(const std::string &ifname, bool bIpv6, DhcpClient &client);
+    ErrCode StartSlaacClient(const std::string &ifname, bool bIpv6, DhcpClient &client, bool layer3 = false);
     ErrCode StartOldClient(const RouterConfig &config, DhcpClient &dhcpClient);
     ErrCode StartNewClient(const RouterConfig &config);
 #if DHCPV6_ENABLE
