@@ -13,7 +13,9 @@
  * limitations under the License.
  */
 
+#include <vector>
 #include "dhcp_address_pool.h"
+#include "dhcp_nearlink_scope.h"
 #include <atomic>
 #include <map>
 #include <mutex>
@@ -34,6 +36,27 @@ DEFINE_DHCPLOG_DHCP_LABEL("DhcpServerAddressPool");
 static int g_releaseRemoveMode = DHCP_RELEASE_REMOVE_MODE;
 static std::map<std::size_t, AddressBinding> g_bindingRecoders;
 static std::mutex g_bindingMapMutex;
+static thread_local char g_nearlinkBindingScope[16]{};
+static std::map<std::string, std::map<std::size_t, AddressBinding>> g_nearlinkBindings;
+
+bool HasNearlinkBindingScope()
+{
+    return g_nearlinkBindingScope[0] != '\0';
+}
+std::string SetNearlinkBindingScope(const std::string &iface)
+{
+    std::string previous = g_nearlinkBindingScope;
+    std::memset(g_nearlinkBindingScope, 0, sizeof(g_nearlinkBindingScope));
+    if (IsNearlinkDhcpInterface(iface)) {
+        std::memcpy(g_nearlinkBindingScope, iface.c_str(), iface.size());
+    }
+    return previous;
+}
+// Called only while g_bindingMapMutex is held. Workers have a fixed interface scope.
+static std::map<std::size_t, AddressBinding> &BindingRecords()
+{
+    return g_nearlinkBindingScope[0] == '\0' ? g_bindingRecoders : g_nearlinkBindings[g_nearlinkBindingScope];
+}
 std::mutex g_leaseTableMutex;
 static int g_distributeMode = 0;
 
@@ -54,8 +77,8 @@ AddressBinding *GetBindingByMac(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 {
     std::size_t hash = macAddrHash(macAddr);
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    if (g_bindingRecoders.count(hash) > 0) {
-        return &g_bindingRecoders[hash];
+    if (BindingRecords().count(hash) > 0) {
+        return &BindingRecords()[hash];
     }
     return nullptr;
 }
@@ -80,7 +103,7 @@ AddressBinding *AddNewBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH], PDhcpOptionLi
     newBind.leaseTime = DHCP_LEASE_TIME;
     {
         std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-        g_bindingRecoders[macAddrHash(macAddr)] = newBind;
+        BindingRecords()[macAddrHash(macAddr)] = newBind;
     }
     return GetBindingByMac(macAddr);
 }
@@ -229,7 +252,10 @@ int InitAddressPool(DhcpAddressPool *pool, const char *ifname, PDhcpOptionList o
         DHCP_LOGD("address pool pointer is null.");
         return RET_ERROR;
     }
-    if (memset_s(pool, sizeof(DhcpAddressPool), 0, sizeof(DhcpAddressPool)) != EOK) {
+    DhcpNearlinkBindingScope bindingScope(ifname);
+    if (IsNearlinkDhcpInterface(ifname)) {
+        *pool = DhcpAddressPool{};
+    } else if (memset_s(pool, sizeof(DhcpAddressPool), 0, sizeof(DhcpAddressPool)) != EOK) {
         DHCP_LOGD("failed to init dhcp pool.");
         return RET_ERROR;
     }
@@ -246,7 +272,7 @@ int InitAddressPool(DhcpAddressPool *pool, const char *ifname, PDhcpOptionList o
         return RET_FAILED;
     }
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    g_bindingRecoders.clear();
+    BindingRecords().clear();
 
     pool->distribue = AddressDistribute;
     pool->binding = QueryBinding;
@@ -262,6 +288,11 @@ void FreeAddressPool(DhcpAddressPool *pool)
         return;
     }
 
+    if (IsNearlinkDhcpInterface(pool->ifname)) {
+        std::lock_guard<std::mutex> lock(g_bindingMapMutex);
+        g_nearlinkBindings.erase(pool->ifname);
+        std::remove((std::string(DHCPD_LEASE_FILE) + "." + pool->ifname).c_str());
+    }
     if (pool->fixedOptions.size > 0) {
         ClearOptions(&pool->fixedOptions);
     }
@@ -279,8 +310,8 @@ void FreeAddressPool(DhcpAddressPool *pool)
 int IsReserved(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 {
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    if (g_bindingRecoders.count(macAddrHash(macAddr)) > 0) {
-        AddressBinding *binding = &g_bindingRecoders[macAddrHash(macAddr)];
+    if (BindingRecords().count(macAddrHash(macAddr)) > 0) {
+        AddressBinding *binding = &BindingRecords()[macAddrHash(macAddr)];
         if (binding && binding->bindingMode == BIND_MODE_RESERVED) {
             return DHCP_TRUE;
         }
@@ -321,11 +352,11 @@ int AddBinding(AddressBinding *binding)
         return RET_ERROR;
     }
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    if (g_bindingRecoders.count(macAddrHash(binding->chaddr)) > 0) {
+    if (BindingRecords().count(macAddrHash(binding->chaddr)) > 0) {
         DHCP_LOGW("binding recoder exist.");
         return RET_FAILED;
     }
-    g_bindingRecoders[macAddrHash(binding->chaddr)] = *binding;
+    BindingRecords()[macAddrHash(binding->chaddr)] = *binding;
     return RET_SUCCESS;
 }
 
@@ -340,7 +371,7 @@ int AddReservedBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH])
         bind.bindingTime = Tmspsec();
         bind.pendingTime = bind.bindingTime;
         std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-        g_bindingRecoders[macAddrHash(macAddr)] = bind;
+        BindingRecords()[macAddrHash(macAddr)] = bind;
     }
     return RET_SUCCESS;
 }
@@ -348,8 +379,8 @@ int AddReservedBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 int RemoveBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 {
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    if (g_bindingRecoders.count(macAddrHash(macAddr)) > 0) {
-        g_bindingRecoders.erase(macAddrHash(macAddr));
+    if (BindingRecords().count(macAddrHash(macAddr)) > 0) {
+        BindingRecords().erase(macAddrHash(macAddr));
         return RET_SUCCESS;
     }
     return RET_FAILED;
@@ -358,10 +389,10 @@ int RemoveBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 int RemoveReservedBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 {
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    if (g_bindingRecoders.count(macAddrHash(macAddr)) > 0) {
-        AddressBinding *binding = &g_bindingRecoders[macAddrHash(macAddr)];
+    if (BindingRecords().count(macAddrHash(macAddr)) > 0) {
+        AddressBinding *binding = &BindingRecords()[macAddrHash(macAddr)];
         if (binding && binding->bindingMode == BIND_MODE_RESERVED) {
-            g_bindingRecoders.erase(macAddrHash(macAddr));
+            BindingRecords().erase(macAddrHash(macAddr));
             return RET_SUCCESS;
         }
     }
@@ -372,12 +403,12 @@ int RemoveReservedBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 int ReleaseBinding(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 {
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    if (g_bindingRecoders.count(macAddrHash(macAddr)) > 0) {
+    if (BindingRecords().count(macAddrHash(macAddr)) > 0) {
         if (g_releaseRemoveMode) {
-            g_bindingRecoders.erase(macAddrHash(macAddr));
+            BindingRecords().erase(macAddrHash(macAddr));
             return RET_SUCCESS;
         }
-        AddressBinding *binding = &g_bindingRecoders[macAddrHash(macAddr)];
+        AddressBinding *binding = &BindingRecords()[macAddrHash(macAddr)];
         if (binding) {
             binding->bindingStatus = BIND_RELEASED;
             return RET_SUCCESS;
@@ -471,6 +502,8 @@ int RemoveLease(DhcpAddressPool *pool, AddressBinding *lease)
 
 int LoadBindingRecoders(DhcpAddressPool *pool)
 {
+    if (pool && IsNearlinkDhcpInterface(pool->ifname))
+        return RET_SUCCESS;
     if (pool == nullptr) {
         DHCP_LOGE("loadbinding recorder pool pointer is null.");
         return RET_FAILED;
@@ -515,6 +548,8 @@ int LoadBindingRecoders(DhcpAddressPool *pool)
 
 int SaveBindingRecoders(const DhcpAddressPool *pool, int force)
 {
+    static std::mutex saveMutex;
+    std::lock_guard<std::mutex> saveLock(saveMutex);
     if (pool == nullptr) {
         DHCP_LOGE("Save binding record, pool is null");
         return RET_FAILED;

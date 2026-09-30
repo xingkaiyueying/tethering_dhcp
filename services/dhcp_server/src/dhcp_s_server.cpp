@@ -13,7 +13,10 @@
  * limitations under the License.
  */
 
+#include <vector>
 #include "dhcp_s_server.h"
+#include "dhcp_nearlink_scope.h"
+#include <new>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <fcntl.h>
@@ -211,7 +214,7 @@ int InitServer(const char *ifname)
 
 struct sockaddr_in *BroadcastAddrIn(void)
 {
-    static struct sockaddr_in broadcastAddrIn = {0};
+    static thread_local struct sockaddr_in broadcastAddrIn = {0};
     if (broadcastAddrIn.sin_port == 0) {
         broadcastAddrIn.sin_port = htons(DHCP_CLIENT_PORT);
         broadcastAddrIn.sin_family = AF_INET;
@@ -222,7 +225,10 @@ struct sockaddr_in *BroadcastAddrIn(void)
 
 struct sockaddr_in *SourceAddrIn(void)
 {
-    static struct sockaddr_in sourceAddrIn = {0};
+    static thread_local struct sockaddr_in nearlinkSourceAddrIn = {0};
+    if (HasNearlinkBindingScope())
+        return &nearlinkSourceAddrIn;
+    static thread_local struct sockaddr_in sourceAddrIn = {0};
     sourceAddrIn.sin_port = htons(DHCP_CLIENT_PORT);
     sourceAddrIn.sin_family = AF_INET;
     sourceAddrIn.sin_addr.s_addr = INADDR_ANY;
@@ -246,7 +252,7 @@ uint32_t SourceIpAddress(void)
 }
 struct sockaddr_in *DestinationAddrIn(void)
 {
-    static struct sockaddr_in destAddrIn = {0};
+    static thread_local struct sockaddr_in destAddrIn = {0};
     if (destAddrIn.sin_port == 0) {
         destAddrIn.sin_port = htons(DHCP_CLIENT_PORT);
         destAddrIn.sin_family = AF_INET;
@@ -263,7 +269,7 @@ struct sockaddr_in *DestinationAddr(uint32_t ipAddress)
 
 int ReceiveDhcpMessage(int sock, PDhcpMsgInfo msgInfo)
 {
-    static uint8_t recvBuffer[RECV_BUFFER_SIZE] = {0};
+    static thread_local uint8_t recvBuffer[RECV_BUFFER_SIZE] = {0};
     struct timeval tmt;
     fd_set recvFd;
     FD_ZERO(&recvFd);
@@ -521,6 +527,7 @@ static int ContinueReceive(PDhcpMsgInfo from, int recvRet)
 static void *BeginLooper(void *argc) __attribute__((no_sanitize("cfi")))
 {
     PDhcpServerContext ctx = (PDhcpServerContext)argc;
+    DhcpNearlinkBindingScope scope(ctx ? ctx->ifname : "");
     DHCP_LOGI("start %{public}s %{public}d", __func__, __LINE__);
     DhcpMsgInfo from;
     DhcpMsgInfo reply;
@@ -532,11 +539,18 @@ static void *BeginLooper(void *argc) __attribute__((no_sanitize("cfi")))
     {
         std::lock_guard<std::mutex> lock(srvIns->fdMutex);
         ctx->instance->serverFd = InitServer(ctx->ifname);
-        if (ctx->instance->serverFd < 0) { return nullptr; }
+        if (ctx->instance->serverFd < 0) {
+            srvIns->looperState = LS_STOPED;
+            return nullptr;
+        }
     }
     InitOptionList(&from.options);
     InitOptionList(&reply.options);
-    srvIns->looperState = LS_RUNNING;
+    if (IsNearlinkDhcpInterface(ctx->ifname)) {
+        int expected = LS_STARING;
+        srvIns->looperState.compare_exchange_strong(expected, LS_RUNNING);
+    } else
+        srvIns->looperState = LS_RUNNING;
     while (srvIns->looperState) {
         if (OnLooperStateChanged(ctx) != RET_SUCCESS) {
             DHCP_LOGI("OnLooperStateChanged break, looperState:%{public}d", srvIns->looperState.load());
@@ -685,9 +699,13 @@ int StartDhcpServer(PDhcpServerContext ctx)
     if (srvIns->callback) {
         srvIns->callback(ST_STARTING, 1, ctx->ifname);
     }
+    if (IsNearlinkDhcpInterface(ctx->ifname))
+        srvIns->looperState = LS_STARING;
     pthread_t threadId;
     int ret = pthread_create(&threadId, nullptr, BeginLooper, ctx);
     if (ret != RET_SUCCESS) {
+        if (IsNearlinkDhcpInterface(ctx->ifname))
+            srvIns->looperState = LS_IDLE;
         DHCP_LOGI("failed to start dhcp server.");
         return RET_FAILED;
     }
@@ -2021,7 +2039,16 @@ PDhcpServerContext InitializeServer(DhcpConfig *config)
         DHCP_LOGE("failed to calloc server context.");
         return nullptr;
     }
-    if ((context->instance = (ServerContext *)calloc(1, sizeof(ServerContext))) == nullptr) {
+    if (IsNearlinkDhcpInterface(config->ifname) &&
+        strcpy_s(context->ifname, sizeof(context->ifname), config->ifname) != EOK) {
+        free(context);
+        return nullptr;
+    }
+    DhcpNearlinkBindingScope scope(config->ifname);
+    bool nearlink = IsNearlinkDhcpInterface(config->ifname);
+    context->instance =
+        nearlink ? new (std::nothrow) ServerContext{} : static_cast<ServerContext *>(calloc(1, sizeof(ServerContext)));
+    if (context->instance == nullptr) {
         DHCP_LOGE("failed to calloc server instance.");
         FreeServerContext(&context);
         return nullptr;
@@ -2069,7 +2096,10 @@ int FreeServerContext(PDhcpServerContext *ctx)
     }
     FreeAddressPool(&srvIns->addressPool);
     if ((*ctx)->instance != nullptr) {
-        free((*ctx)->instance);
+        if (IsNearlinkDhcpInterface((*ctx)->ifname))
+            delete (*ctx)->instance;
+        else
+            free((*ctx)->instance);
         (*ctx)->instance = nullptr;
     }
     free(*ctx);
