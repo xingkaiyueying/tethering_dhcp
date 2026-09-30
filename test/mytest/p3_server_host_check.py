@@ -190,3 +190,57 @@ inline char *strtok_r(char*s,const char*d,char**){return strtok(s,d);}
     subprocess.run(['g++', '-std=c++17', '-fsyntax-only', *[f'-I{p}' for p in includes],
                     str(src / 'src/dhcp_dhcpd.cpp')], check=True)
     print('full DHCP main adapter syntax: real headers / platform utility doubles PASS')
+    # Execute real stop/free methods, including a worker finishing after a first
+    # free timeout. Socket/worker completion and the wait clock are explicit doubles.
+    stop = server[server.index('int StopDhcpServer(PDhcpServerContext ctx)'):server.index('int GetServerStatus(')]
+    free_context = server[server.index('int FreeServerContext(PDhcpServerContext *ctx)'):]
+    stop_code = r'''
+#include <atomic>
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
+#include "dhcp_nearlink_scope.h"
+#define DHCP_LOGI(...) ((void)0)
+#define DHCP_LOGE(...) ((void)0)
+constexpr int RET_SUCCESS=0,RET_FAILED=-1;
+enum {LS_IDLE,LS_STARING,LS_RUNNING,LS_RELOADNG,LS_STOPING,LS_STOPED};
+struct ServerContext {std::atomic<int> looperState{LS_IDLE};int addressPool=0;};
+struct DhcpServerContext {char ifname[32];ServerContext *instance;};
+using PDhcpServerContext=DhcpServerContext*;
+ServerContext *GetServerInstance(PDhcpServerContext c){return c?c->instance:nullptr;}
+int freedPools=0,waits=0;
+void FreeAddressPool(int*){++freedPools;}
+void usleep(unsigned){++waits;}
+''' + stop + free_context + r'''
+PDhcpServerContext context(int state,const char *name="sleip0") {
+    auto c=static_cast<PDhcpServerContext>(malloc(sizeof(DhcpServerContext)));
+    strcpy(c->ifname,name);c->instance=new ServerContext;c->instance->looperState=state;return c;
+}
+int main() {
+    for(int state:{LS_IDLE,LS_STOPED}) {
+        auto c=context(state);waits=0;
+        assert(StopDhcpServer(c)==0 && c->instance->looperState==state);
+        assert(FreeServerContext(&c)==0 && !c && waits==0);
+    }
+    for(int state:{LS_STARING,LS_RUNNING,LS_RELOADNG,LS_STOPING}) {
+        auto c=context(state);assert(StopDhcpServer(c)==0 && c->instance->looperState==LS_STOPING);
+        assert(StopDhcpServer(c)==0 && c->instance->looperState==LS_STOPING);
+        waits=0;int prior=freedPools;
+        assert(FreeServerContext(&c)!=0 && c && waits==5 && freedPools==prior);
+        c->instance->looperState=LS_STOPED; // worker drains after the timed-out free
+        assert(StopDhcpServer(c)==0 && c->instance->looperState==LS_STOPED);
+        assert(FreeServerContext(&c)==0 && !c);
+    }
+    auto c=context(LS_STOPED,"wlan0");assert(StopDhcpServer(c)==0);
+    assert(c->instance->looperState==LS_STOPING); // legacy stop behavior remains
+    delete c->instance;c->instance=nullptr;free(c);
+    puts("production stop/free: stopped/idle idempotence, late drain retry and timeout ownership PASS");
+}
+'''
+    stop_cpp = out / 'stop.cpp'
+    stop_cpp.write_text(stop_code)
+    stop_exe = out / 'stop.exe'
+    subprocess.run(['g++', '-std=c++17', *[f'-I{p}' for p in includes],
+                    str(stop_cpp), '-o', str(stop_exe)], check=True)
+    subprocess.run([str(stop_exe)], check=True)

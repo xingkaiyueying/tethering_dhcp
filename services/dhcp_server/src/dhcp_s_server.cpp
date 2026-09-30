@@ -721,7 +721,15 @@ int StopDhcpServer(PDhcpServerContext ctx)
         DHCP_LOGE("StopDhcpServer GetServerInstance failed!");
         return RET_FAILED;
     }
-    srvIns->looperState = LS_STOPING;
+    if (IsNearlinkDhcpInterface(ctx->ifname)) {
+        // A timed-out free can be retried after the worker has finished. Never
+        // resurrect STOPING from STOPED/IDLE: there is no worker left to drain it.
+        int state = srvIns->looperState.load();
+        while (state != LS_STOPED && state != LS_IDLE && state != LS_STOPING &&
+               !srvIns->looperState.compare_exchange_weak(state, LS_STOPING)) {}
+    } else {
+        srvIns->looperState = LS_STOPING;
+    }
     DHCP_LOGI("StopDhcpServer looperState LS_STOPING!");
     return RET_SUCCESS;
 }
