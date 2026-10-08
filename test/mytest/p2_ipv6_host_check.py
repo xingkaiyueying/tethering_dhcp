@@ -11,9 +11,11 @@ with tempfile.TemporaryDirectory(prefix='p2-dhcp-') as directory:
     put('securec.h', '''#pragma once
 #include <cstring>
 #define EOK 0
-inline int memcpy_s(void*d,size_t n,const void*s,size_t k){if(k>n)return -1;memcpy(d,s,k);return 0;}
+inline int MockMemcpyS(void*d,size_t n,const void*s,size_t k){if(k>n)return -1;memcpy(d,s,k);return 0;}
+#define memcpy_s MockMemcpyS
 inline int memset_s(void*d,size_t n,int c,size_t k){if(k>n)return -1;memset(d,c,k);return 0;}
-inline int strcpy_s(char*d,size_t n,const char*s){if(strlen(s)>=n)return -1;strcpy(d,s);return 0;}
+inline int MockStrcpyS(char*d,size_t n,const char*s){if(strlen(s)>=n)return -1;strcpy(d,s);return 0;}
+#define strcpy_s MockStrcpyS
 ''')
     production = (repo/'services/dhcp_client/src/dhcp_ipv6_event.cpp').read_text(encoding='utf-8')
     parser = production.split('bool DhcpIpv6Client::ParseL3Address(void *msg)', 1)[1].split(
