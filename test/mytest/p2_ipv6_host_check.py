@@ -29,7 +29,19 @@ inline int MockStrcpyS(char*d,size_t n,const char*s){if(strlen(s)>=n)return -1;s
 #include <iostream>
 #include <cstdint>
 #include <chrono>
+#include <cstdio>
 #include "securec.h"
+std::vector<std::string> timingLogs;
+template<class... Args> void CaptureLog(std::string format, Args... args)
+{
+ for (const auto *tag : {"{public}", "{private}"}) {
+  size_t pos;while((pos=format.find(tag))!=std::string::npos)format.erase(pos,strlen(tag));
+ }
+ char message[2048]{};snprintf(message,sizeof(message),format.c_str(),args...);
+ timingLogs.emplace_back(message);
+}
+#define DHCP_LOGI(...) CaptureLog(__VA_ARGS__)
+std::string Ipv6Anonymize(const std::string &){return "fd**::**";}
 constexpr int AF_INET6=10, DHCP_INET6_ADDRSTRLEN=128;
 constexpr int IFA_ADDRESS=1, IFA_CACHEINFO=6, IFA_FLAGS=8, IFA_F_TENTATIVE=0x40, IFA_F_DADFAILED=8;
 constexpr int RTM_NEWADDR=20, RTM_DELADDR=21;
@@ -48,6 +60,7 @@ struct ifa_cacheinfo{uint32_t ifa_prefered,ifa_valid,created,updated;};
 struct L3Ipv6Address{std::string address;uint64_t observedAt=0;uint32_t ifindex=0,prefixLength=0,flags=0,preferredLifetime=0,validLifetime=0;};
 enum class AddrType{GLOBAL};
 struct DhcpIpv6Client {
+ std::string interfaceName="sleip0";
  std::mutex mutex_;
  struct {std::vector<L3Ipv6Address> l3Addresses;std::map<std::string,int> IpAddrMap;bool l3Ipv6=false;} dhcpIpv6Info;
  int GetIpFromS6Address(void*p,int,char*out,int n){return strcpy_s(out,n,("fd77::"+std::to_string(((uint8_t*)p)[15])).c_str());}
@@ -66,10 +79,17 @@ int main(){
  assert(client.ParseL3Address(&msg)); auto &s=client.dhcpIpv6Info;
  assert(s.l3Addresses.size()==1 && s.IpAddrMap.empty());
  assert(s.l3Addresses[0].preferredLifetime==30 && s.l3Addresses[0].flags==IFA_F_TENTATIVE);
+ assert(timingLogs.size()==1 && timingLogs.back().find("flags:64")!=std::string::npos);
+ msg.life.ifa_valid=100;assert(client.ParseL3Address(&msg));
+ assert(timingLogs.size()==1 && s.l3Addresses[0].validLifetime==100);
+ msg.life.ifa_valid=90;
  msg.flags=0; assert(client.ParseL3Address(&msg) && s.IpAddrMap.size()==1);
+ assert(timingLogs.size()==2 && timingLogs.back().find("flags:0")!=std::string::npos);
+ assert(timingLogs.back().find("address:fd**::**")!=std::string::npos);
  msg.address[15]=3; msg.flags=IFA_F_DADFAILED;
  assert(client.ParseL3Address(&msg) && s.IpAddrMap.size()==1 && s.l3Addresses.size()==2);
  msg.header.nlmsg_type=RTM_DELADDR; assert(client.ParseL3Address(&msg) && s.l3Addresses.size()==1);
+ assert(timingLogs.size()==4 && timingLogs.back().find("event:DELETE")!=std::string::npos);
  msg.header.nlmsg_type=RTM_NEWADDR; msg.life.ifa_prefered=91;
  assert(!client.ParseL3Address(&msg) && s.l3Addresses.size()==1);
  msg.life.ifa_prefered=30; msg.addressAttr.rta_len=19; assert(!client.ParseL3Address(&msg));

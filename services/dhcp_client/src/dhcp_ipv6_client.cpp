@@ -26,6 +26,7 @@
 #include "securec.h"
 #include "dhcp_logger.h"
 #include "dhcp_ipv6_client.h"
+#include <chrono>
 #include "dhcp_result.h"
 #include "dhcp_thread.h"
 #include "dhcp_function.h"
@@ -543,6 +544,13 @@ void DhcpIpv6Client::onIpv6DnsAddEvent(void* data, int len, int ifaIndex)
     bool changed = dhcpIpv6DnsRepository_->AddServers(lifetime, dnsAddrVector);
     if (changed) {
         DHCP_LOGI("onIpv6DnsAddEvent dns servers changed");
+        if (layer3_) {
+            auto mono = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            DHCP_LOGI("[DHCP][L3Tun][ConfigTiming] stage=RDNSS_EVENT ifname:%{public}s ifindex:%{public}d "
+                "monoMs:%{public}lld servers:%{public}d lifetime:%{public}u", interfaceName.c_str(), ifaIndex,
+                static_cast<long long>(mono), numaddrs, lifetime);
+        }
         {
             std::lock_guard<std::mutex> lock(mutex_);
             dhcpIpv6DnsRepository_->SetCurrentServers(dhcpIpv6Info);
@@ -587,6 +595,13 @@ void DhcpIpv6Client::OnIpv6RouteUpdateEvent(char* gateway, char* dst, int ifaInd
         }
     }
     if (isChanged) {
+        if (layer3_) {
+            auto mono = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            DHCP_LOGI("[DHCP][L3Tun][ConfigTiming] stage=DEFAULT_ROUTE_EVENT ifname:%{public}s ifindex:%{public}d "
+                "monoMs:%{public}lld added:%{public}d", interfaceName.c_str(), ifaIndex,
+                static_cast<long long>(mono), isAdd);
+        }
         PublishIpv6Result();
     }
 }

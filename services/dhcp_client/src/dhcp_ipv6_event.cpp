@@ -431,6 +431,9 @@ bool DhcpIpv6Client::ParseL3Address(void *msg)
     auto found = std::find_if(records.begin(), records.end(), [&address](const L3Ipv6Address &a) {
         return a.address == address.address;
     });
+    // Log address/flag transitions, while lifetime-only RA refreshes keep their existing publication path.
+    bool timingChanged = found == records.end() || found->flags != address.flags ||
+        found->prefixLength != address.prefixLength || header->nlmsg_type == RTM_DELADDR;
     if (header->nlmsg_type == RTM_DELADDR) {
         if (found != records.end()) {
             records.erase(found);
@@ -452,6 +455,16 @@ bool DhcpIpv6Client::ParseL3Address(void *msg)
         }
     }
     dhcpIpv6Info.l3Ipv6 = true;
+    if (timingChanged) {
+        auto mono = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        DHCP_LOGI("[DHCP][L3Tun][ConfigTiming] stage=ADDRESS_EVENT ifname:%{public}s ifindex:%{public}u "
+            "monoMs:%{public}lld event:%{public}s address:%{public}s prefix:%{public}u flags:%{public}u "
+            "preferred:%{public}u valid:%{public}u", interfaceName.c_str(), address.ifindex,
+            static_cast<long long>(mono), header->nlmsg_type == RTM_DELADDR ? "DELETE" : "NEW",
+            Ipv6Anonymize(address.address).c_str(), address.prefixLength, address.flags,
+            address.preferredLifetime, address.validLifetime);
+    }
     return true;
 }
 
