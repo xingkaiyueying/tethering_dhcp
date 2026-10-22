@@ -544,13 +544,6 @@ void DhcpIpv6Client::onIpv6DnsAddEvent(void* data, int len, int ifaIndex)
     bool changed = dhcpIpv6DnsRepository_->AddServers(lifetime, dnsAddrVector);
     if (changed) {
         DHCP_LOGI("onIpv6DnsAddEvent dns servers changed");
-        if (layer3_) {
-            auto mono = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            DHCP_LOGI("[DHCP][L3Tun][ConfigTiming] stage=RDNSS_EVENT ifname:%{public}s ifindex:%{public}d "
-                "monoMs:%{public}lld servers:%{public}d lifetime:%{public}u", interfaceName.c_str(), ifaIndex,
-                static_cast<long long>(mono), numaddrs, lifetime);
-        }
         {
             std::lock_guard<std::mutex> lock(mutex_);
             dhcpIpv6DnsRepository_->SetCurrentServers(dhcpIpv6Info);
@@ -595,13 +588,6 @@ void DhcpIpv6Client::OnIpv6RouteUpdateEvent(char* gateway, char* dst, int ifaInd
         }
     }
     if (isChanged) {
-        if (layer3_) {
-            auto mono = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            DHCP_LOGI("[DHCP][L3Tun][ConfigTiming] stage=DEFAULT_ROUTE_EVENT ifname:%{public}s ifindex:%{public}d "
-                "monoMs:%{public}lld added:%{public}d", interfaceName.c_str(), ifaIndex,
-                static_cast<long long>(mono), isAdd);
-        }
         PublishIpv6Result();
     }
 }
@@ -746,7 +732,10 @@ int DhcpIpv6Client::StartIpv6()
     }
     uint8_t *buff = (uint8_t*)malloc(KERNEL_BUFF_SIZE * sizeof(uint8_t));
     if (layer3_) {
-        struct { nlmsghdr header; ifaddrmsg address; } request{};
+        struct {
+            nlmsghdr header;
+            ifaddrmsg address;
+        } request{};
         request.header.nlmsg_len = NLMSG_LENGTH(sizeof(ifaddrmsg));
         request.header.nlmsg_type = RTM_GETADDR;
         request.header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;

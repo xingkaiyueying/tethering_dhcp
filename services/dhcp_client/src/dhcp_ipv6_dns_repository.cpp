@@ -44,6 +44,14 @@ bool DnsServerRepository::Clear()
 bool DnsServerRepository::Expire()
 {
     std::lock_guard<std::mutex> lock(mutex);
+    const auto now = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+    // The L3 maintenance tick only rebuilds the set when a stored record expires.
+    if (std::none_of(allServers_.begin(), allServers_.end(),
+                     [now](const auto &entry) { return entry.expiry <= now; })) {
+        return false;
+    }
     return UpdateCurrentServers();
 }
 
@@ -56,9 +64,9 @@ bool DnsServerRepository::AddServers(uint32_t lifetime, const std::vector<std::s
         return false;
     }
 
-    uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()
-    ).count());
+    uint64_t now = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
 
     uint64_t expiry = lifetime == UINT32_MAX ? UINT64_MAX : now + static_cast<uint64_t>(lifetime) * 1000;
 
@@ -130,9 +138,9 @@ bool DnsServerRepository::UpdateExistingEntry(const std::string& address, uint64
 
 bool DnsServerRepository::UpdateCurrentServers()
 {
-    uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()
-    ).count());
+    uint64_t now = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
 
     bool changed = false;
     if (allServers_.empty()) {

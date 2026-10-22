@@ -79,17 +79,16 @@ int main(){
  assert(client.ParseL3Address(&msg)); auto &s=client.dhcpIpv6Info;
  assert(s.l3Addresses.size()==1 && s.IpAddrMap.empty());
  assert(s.l3Addresses[0].preferredLifetime==30 && s.l3Addresses[0].flags==IFA_F_TENTATIVE);
- assert(timingLogs.size()==1 && timingLogs.back().find("flags:64")!=std::string::npos);
+ assert(timingLogs.empty());
  msg.life.ifa_valid=100;assert(client.ParseL3Address(&msg));
- assert(timingLogs.size()==1 && s.l3Addresses[0].validLifetime==100);
+ assert(timingLogs.empty());
  msg.life.ifa_valid=90;
  msg.flags=0; assert(client.ParseL3Address(&msg) && s.IpAddrMap.size()==1);
- assert(timingLogs.size()==2 && timingLogs.back().find("flags:0")!=std::string::npos);
- assert(timingLogs.back().find("address:fd**::**")!=std::string::npos);
+ assert(timingLogs.empty());
  msg.address[15]=3; msg.flags=IFA_F_DADFAILED;
  assert(client.ParseL3Address(&msg) && s.IpAddrMap.size()==1 && s.l3Addresses.size()==2);
  msg.header.nlmsg_type=RTM_DELADDR; assert(client.ParseL3Address(&msg) && s.l3Addresses.size()==1);
- assert(timingLogs.size()==4 && timingLogs.back().find("event:DELETE")!=std::string::npos);
+ assert(timingLogs.empty());
  msg.header.nlmsg_type=RTM_NEWADDR; msg.life.ifa_prefered=91;
  assert(!client.ParseL3Address(&msg) && s.l3Addresses.size()==1);
  msg.life.ifa_prefered=30; msg.addressAttr.rta_len=19; assert(!client.ParseL3Address(&msg));
@@ -101,7 +100,7 @@ int main(){
 ''')
     subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(out),str(out/'parser.cpp'),'-o',str(out/'parser.exe')],check=True)
     subprocess.run([str(out/'parser.exe')],check=True)
-    put('dhcp_logger.h', '#define DEFINE_DHCPLOG_DHCP_LABEL(...)\n#define DHCP_LOGI(...) ((void)0)\n#define DHCP_LOGE(...) ((void)0)\n')
+    put('dhcp_logger.h', '#pragma once\ninline unsigned dnsInfoLogs=0;\n#define DEFINE_DHCPLOG_DHCP_LABEL(...)\n#define DHCP_LOGI(...) (++dnsInfoLogs)\n#define DHCP_LOGE(...) ((void)0)\n')
     put('dhcp_ipv6_define.h', '')
     put('dhcp_ipv6_info.h', '''#pragma once
 #include <algorithm>
@@ -125,6 +124,9 @@ struct DnsServerEntry{std::string address;uint64_t expiry;};
 int main(){using namespace OHOS::DHCP;DnsServerRepository r(0);DhcpIpv6Info info;
  assert(r.AddServers(30,{"fd77::53"})); assert(r.AddServers(1,{"fd77::54"}));
  assert(r.SetCurrentServers(info) && info.vectorDnsAddr.size()==2);
+ auto logsBefore=dnsInfoLogs;
+ for(int n=0;n<100;++n)assert(!r.Expire());
+ assert(dnsInfoLogs==logsBefore); // periodic checks preserve the set and stay quiet
  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
  assert(r.Expire());r.SetCurrentServers(info);assert(info.vectorDnsAddr.size()==1 && info.vectorDnsAddr[0]=="fd77::53");
  assert(r.AddServers(0,{"fd77::53"}));r.SetCurrentServers(info);assert(info.vectorDnsAddr.empty());

@@ -384,8 +384,8 @@ struct RouterConfig {
     bool bSpecificNetwork { false };
     bool isStaticIpv4 { false };
     bool bIpv4 { true };
-    DhcpLinkMode linkMode { DhcpLinkMode::L2_PACKET };
-    std::array<uint8_t, ETH_MAC_ADDR_LEN> clientKey {};
+    DhcpLinkMode linkMode{DhcpLinkMode::L2_PACKET};
+    std::array<uint8_t, ETH_MAC_ADDR_LEN> clientKey{};
 };
 
 struct IpCacheInfo {

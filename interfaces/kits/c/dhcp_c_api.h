@@ -57,11 +57,12 @@ extern "C" {
     /* Register before StartDhcpClientL3; nullptr unregisters. Snapshot is valid only during the callback. */
     /* Demo session callback: each registration gets a distinct Binder target. */
     DhcpErrorCode RegisterDhcpClientL3Session(const char *ifname, uint64_t generation,
-        void (*success)(uint64_t, int, const char *, const DhcpResult *, const DhcpL3Ipv6Snapshot *),
-        void (*failure)(uint64_t, int, const char *, const char *));
+                                              void (*success)(uint64_t, int, const char *, const DhcpResult *,
+                                                              const DhcpL3Ipv6Snapshot *),
+                                              void (*failure)(uint64_t, int, const char *, const char *));
 
     DhcpErrorCode RegisterDhcpClientL3Ipv6CallBack(const char *ifname,
-        void (*callback)(const char *, const DhcpL3Ipv6Snapshot *));
+                                                   void (*callback)(const char *, const DhcpL3Ipv6Snapshot *));
 
     /**
      * @Description : add dhcp cache

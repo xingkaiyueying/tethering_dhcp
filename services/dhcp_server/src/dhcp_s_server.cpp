@@ -726,7 +726,8 @@ int StopDhcpServer(PDhcpServerContext ctx)
         // resurrect STOPING from STOPED/IDLE: there is no worker left to drain it.
         int state = srvIns->looperState.load();
         while (state != LS_STOPED && state != LS_IDLE && state != LS_STOPING &&
-               !srvIns->looperState.compare_exchange_weak(state, LS_STOPING)) {}
+               !srvIns->looperState.compare_exchange_weak(state, LS_STOPING)) {
+        }
     } else {
         srvIns->looperState = LS_STOPING;
     }

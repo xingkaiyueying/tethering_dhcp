@@ -88,8 +88,8 @@ void DhcpClientCallBackStub::SetRemoteDied(bool val)
 
 void DhcpClientCallBackStub::OnIpSuccessChanged(int status, const std::string& ifname, DhcpResult& result)
 {
-    DHCP_LOGI("[DHCP][CallbackStub] success callback received, ifname:%{public}s status:%{public}d",
-        ifname.c_str(), status);
+    DHCP_LOGI("[DHCP][CallbackStub] success callback received, ifname:%{public}s status:%{public}d", ifname.c_str(),
+              status);
     sptr<IDhcpClientCallBack> tempCallback;
     {
         std::unique_lock<std::mutex> lock(callbackMutex_);
@@ -105,8 +105,8 @@ void DhcpClientCallBackStub::OnIpSuccessChanged(int status, const std::string& i
 
 void DhcpClientCallBackStub::OnIpFailChanged(int status, const std::string& ifname, const std::string& reason)
 {
-    DHCP_LOGI("[DHCP][CallbackStub] failure callback received, ifname:%{public}s status:%{public}d",
-        ifname.c_str(), status);
+    DHCP_LOGI("[DHCP][CallbackStub] failure callback received, ifname:%{public}s status:%{public}d", ifname.c_str(),
+              status);
     sptr<IDhcpClientCallBack> tempCallback;
     {
         std::unique_lock<std::mutex> lock(callbackMutex_);
@@ -139,7 +139,8 @@ int DhcpClientCallBackStub::RemoteOnIpSuccessChanged(uint32_t code, MessageParce
     int state = data.ReadInt32();
     std::string ifname = data.ReadString();
     DhcpResult result = DeserializeDhcpResult(data);
-    if (result.iptype != 0 && result.iptype != 1) return -1;
+    if (result.iptype != 0 && result.iptype != 1)
+        return -1;
     OnIpSuccessChanged(state, ifname, result);
     reply.WriteInt32(0);
     return 0;
@@ -148,35 +149,55 @@ int DhcpClientCallBackStub::RemoteOnIpSuccessChanged(uint32_t code, MessageParce
 DhcpResult DhcpClientCallBackStub::DeserializeDhcpResult(MessageParcel &data)
 {
     DhcpResult result;
-    if (!data.ReadInt32(result.iptype) || !data.ReadBool(result.isOptSuc) ||
-        !data.ReadUint32(result.uLeaseTime) || !data.ReadUint32(result.uAddTime) ||
-        !data.ReadUint32(result.uGetTime)) return DhcpResult{};
-    if (!data.ReadString(result.strYourCli)) return DhcpResult{};
-    if (!data.ReadString(result.strServer)) return DhcpResult{};
-    if (!data.ReadString(result.strSubnet)) return DhcpResult{};
-    if (!data.ReadString(result.strDns1)) return DhcpResult{};
-    if (!data.ReadString(result.strDns2)) return DhcpResult{};
-    if (!data.ReadString(result.strRouter1)) return DhcpResult{};
-    if (!data.ReadString(result.strRouter2)) return DhcpResult{};
-    if (!data.ReadString(result.strVendor)) return DhcpResult{};
-    if (!data.ReadString(result.strLinkIpv6Addr)) return DhcpResult{};
-    if (!data.ReadString(result.strRandIpv6Addr)) return DhcpResult{};
-    if (!data.ReadString(result.strLocalAddr1)) return DhcpResult{};
-    if (!data.ReadString(result.strLocalAddr2)) return DhcpResult{};
-    if (!data.ReadUint8(result.raFlags)) return DhcpResult{};
+    if (!data.ReadInt32(result.iptype) || !data.ReadBool(result.isOptSuc) || !data.ReadUint32(result.uLeaseTime) ||
+        !data.ReadUint32(result.uAddTime) || !data.ReadUint32(result.uGetTime))
+        return DhcpResult{};
+    if (!data.ReadString(result.strYourCli))
+        return DhcpResult{};
+    if (!data.ReadString(result.strServer))
+        return DhcpResult{};
+    if (!data.ReadString(result.strSubnet))
+        return DhcpResult{};
+    if (!data.ReadString(result.strDns1))
+        return DhcpResult{};
+    if (!data.ReadString(result.strDns2))
+        return DhcpResult{};
+    if (!data.ReadString(result.strRouter1))
+        return DhcpResult{};
+    if (!data.ReadString(result.strRouter2))
+        return DhcpResult{};
+    if (!data.ReadString(result.strVendor))
+        return DhcpResult{};
+    if (!data.ReadString(result.strLinkIpv6Addr))
+        return DhcpResult{};
+    if (!data.ReadString(result.strRandIpv6Addr))
+        return DhcpResult{};
+    if (!data.ReadString(result.strLocalAddr1))
+        return DhcpResult{};
+    if (!data.ReadString(result.strLocalAddr2))
+        return DhcpResult{};
+    if (!data.ReadUint8(result.raFlags))
+        return DhcpResult{};
     int32_t size = 0;
-    if (!data.ReadInt32(size) || size < 0 || size > DHCP_MAX_DNS_SIZE) return DhcpResult{};
+    if (!data.ReadInt32(size) || size < 0 || size > DHCP_MAX_DNS_SIZE)
+        return DhcpResult{};
     for (int32_t i = 0; i < size; ++i) {
         std::string value;
-        if (!data.ReadString(value)) return DhcpResult{};
-        if (!value.empty()) result.vectorDnsAddr.push_back(value);
+        if (!data.ReadString(value))
+            return DhcpResult{};
+        if (!value.empty())
+            result.vectorDnsAddr.push_back(value);
     }
     int32_t addrCnt = 0;
-    if (!data.ReadInt32(addrCnt) || addrCnt < 0 || addrCnt > DHCP_MAX_ADDR_SIZE) return DhcpResult{};
+    if (!data.ReadInt32(addrCnt) || addrCnt < 0 || addrCnt > DHCP_MAX_ADDR_SIZE)
+        return DhcpResult{};
     for (int32_t i = 0; i < addrCnt; ++i) {
-        std::string address; int32_t type = 0;
-        if (!data.ReadString(address) || !data.ReadInt32(type)) return DhcpResult{};
-        if (!address.empty()) result.IpAddrMap[address] = type;
+        std::string address;
+        int32_t type = 0;
+        if (!data.ReadString(address) || !data.ReadInt32(type))
+            return DhcpResult{};
+        if (!address.empty())
+            result.IpAddrMap[address] = type;
     }
     if (data.GetReadableBytes() != 0) {
         uint32_t count = 0;
@@ -185,12 +206,14 @@ DhcpResult DhcpClientCallBackStub::DeserializeDhcpResult(MessageParcel &data)
         for (uint32_t i = 0; i < count; ++i) {
             L3Ipv6Address a;
             if (!data.ReadString(a.address) || a.address.empty() || a.address.size() > 45 ||
-                !data.ReadUint32(a.ifindex) || a.ifindex == 0 || !data.ReadUint32(a.prefixLength) || a.prefixLength > 128 ||
-                !data.ReadUint32(a.flags) || !data.ReadUint32(a.preferredLifetime) || !data.ReadUint32(a.validLifetime) ||
-                a.preferredLifetime > a.validLifetime) return DhcpResult{};
+                !data.ReadUint32(a.ifindex) || a.ifindex == 0 || !data.ReadUint32(a.prefixLength) ||
+                a.prefixLength > 128 || !data.ReadUint32(a.flags) || !data.ReadUint32(a.preferredLifetime) ||
+                !data.ReadUint32(a.validLifetime) || a.preferredLifetime > a.validLifetime)
+                return DhcpResult{};
             result.l3Addresses.push_back(a);
         }
-        if (data.GetReadableBytes() != 0) return DhcpResult{};
+        if (data.GetReadableBytes() != 0)
+            return DhcpResult{};
     }
     return result;
 }
@@ -212,7 +235,8 @@ int DhcpClientCallBackStub::RemoteOnDhcpOfferReport(uint32_t code, MessageParcel
     int state = data.ReadInt32();
     std::string ifname = data.ReadString();
     DhcpResult result = DeserializeDhcpResult(data);
-    if (result.iptype != 0 && result.iptype != 1) return -1;
+    if (result.iptype != 0 && result.iptype != 1)
+        return -1;
     OnDhcpOfferReport(state, ifname, result);
     reply.WriteInt32(0);
     return 0;
