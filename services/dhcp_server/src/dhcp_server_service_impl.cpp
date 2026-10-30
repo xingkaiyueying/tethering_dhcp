@@ -14,6 +14,7 @@
  */
 
 #include "dhcp_server_service_impl.h"
+#include "dhcp_nearlink_scope.h"
 #ifndef OHOS_ARCH_LITE
 #include <file_ex.h>
 #endif
@@ -318,6 +319,8 @@ ErrCode DhcpServerServiceImpl::StopDhcpServer(const std::string& ifname)
         return DHCP_E_FAILED;
     }
 
+    if (IsNearlinkDhcpInterface(ifname) && StopNearlinkDhcpServerMain(ifname) != 0)
+        return DHCP_E_FAILED;
     /* protect m_mapInfDhcpRange access with mutex */
     {
         std::lock_guard<std::mutex> lock(dhcprangemutex_);
@@ -329,7 +332,8 @@ ErrCode DhcpServerServiceImpl::StopDhcpServer(const std::string& ifname)
     if (RemoveAllDhcpRange(ifname) != DHCP_E_SUCCESS) {
         return DHCP_E_FAILED;
     }
-    StopDhcpServerMain();
+    if (!IsNearlinkDhcpInterface(ifname))
+        StopDhcpServerMain();
     /* Del the specified interface. */
     if (DelSpecifiedInterface(ifname) != DHCP_OPT_SUCCESS) {
         return DHCP_E_FAILED;

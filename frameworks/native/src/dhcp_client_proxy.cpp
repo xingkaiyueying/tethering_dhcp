@@ -112,11 +112,14 @@ ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
 
     // A reused stub can deliver an old Binder message to a replacement callback.
     // Isolate the explicit Demo interface; unrelated DHCP clients retain the existing path.
-    sptr<DhcpClientCallBackStub> callbackStub = ifname == "sleip0"
-        ? sptr<DhcpClientCallBackStub>(new (std::nothrow) DhcpClientCallBackStub()) : g_dhcpClientCallBackStub;
-    if (callbackStub == nullptr) return DHCP_E_FAILED;
+    sptr<DhcpClientCallBackStub> callbackStub =
+        ifname == "sleip0" ? sptr<DhcpClientCallBackStub>(new (std::nothrow) DhcpClientCallBackStub())
+                           : g_dhcpClientCallBackStub;
+    if (callbackStub == nullptr)
+        return DHCP_E_FAILED;
     callbackStub->RegisterCallBack(callback);
-    if (!data.WriteRemoteObject(callbackStub->AsObject())) return DHCP_E_FAILED;
+    if (!data.WriteRemoteObject(callbackStub->AsObject()))
+        return DHCP_E_FAILED;
 
     data.WriteString(ifname);
     DHCP_LOGI("%{public}s, calling uid:%{public}d, ifname:%{public}s", __func__, GetCallingUid(), ifname.c_str());
@@ -124,7 +127,7 @@ ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
         data, reply, option);
     if (error != ERR_NONE) {
         DHCP_LOGE("[DHCP][ClientProxy] register callback transport failed, command:%{public}d code:%{public}d",
-            static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_REG_CALL_BACK), error);
+                  static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_REG_CALL_BACK), error);
         return DHCP_E_FAILED;
     }
     int exception = reply.ReadInt32();
@@ -134,8 +137,7 @@ ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
     }
     ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
     if (ret != DHCP_E_SUCCESS) {
-        DHCP_LOGE("[DHCP][ClientProxy] register callback service failed, ret:%{public}d",
-            static_cast<int32_t>(ret));
+        DHCP_LOGE("[DHCP][ClientProxy] register callback service failed, ret:%{public}d", static_cast<int32_t>(ret));
         return ret;
     }
     DHCP_LOGI("[DHCP][ClientProxy] register callback succeeded, ifname:%{public}s", ifname.c_str());
@@ -145,7 +147,7 @@ ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
 ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
 {
     DHCP_LOGI("[DHCP][ClientProxy] start begin, ifname:%{public}s mode:%{public}u remoteDied:%{public}d",
-        config.ifname.c_str(), static_cast<uint8_t>(config.linkMode), mRemoteDied);
+              config.ifname.c_str(), static_cast<uint8_t>(config.linkMode), mRemoteDied);
     if (mRemoteDied) {
         DHCP_LOGE("[DHCP][ClientProxy] start failed: remote service died");
         return DHCP_E_FAILED;
@@ -176,7 +178,7 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
         static_cast<uint32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT), data, reply, option);
     if (error != ERR_NONE) {
         DHCP_LOGE("[DHCP][ClientProxy] start transport failed, command:%{public}d code:%{public}d",
-            static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT), error);
+                  static_cast<int32_t>(DhcpClientInterfaceCode::DHCP_CLIENT_SVR_CMD_START_DHCP_CLIENT), error);
         return DHCP_E_FAILED;
     }
     int exception = reply.ReadInt32();
@@ -186,8 +188,8 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
     }
     ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
     if (ret != DHCP_E_SUCCESS) {
-        DHCP_LOGE("[DHCP][ClientProxy] start service failed, ifname:%{public}s ret:%{public}d",
-            config.ifname.c_str(), static_cast<int32_t>(ret));
+        DHCP_LOGE("[DHCP][ClientProxy] start service failed, ifname:%{public}s ret:%{public}d", config.ifname.c_str(),
+                  static_cast<int32_t>(ret));
     } else {
         DHCP_LOGI("[DHCP][ClientProxy] start accepted, ifname:%{public}s", config.ifname.c_str());
     }

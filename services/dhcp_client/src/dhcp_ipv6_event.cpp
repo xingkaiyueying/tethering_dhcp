@@ -388,8 +388,8 @@ bool DhcpIpv6Client::ParseL3Address(void *msg)
     auto header = static_cast<nlmsghdr *>(msg);
     auto info = reinterpret_cast<ifaddrmsg *>(NLMSG_DATA(header));
     L3Ipv6Address address;
-    address.observedAt = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+    address.observedAt =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     address.ifindex = info->ifa_index;
     address.prefixLength = info->ifa_prefixlen;
     address.flags = info->ifa_flags;
@@ -428,9 +428,8 @@ bool DhcpIpv6Client::ParseL3Address(void *msg)
     }
     std::lock_guard<std::mutex> lock(mutex_);
     auto &records = dhcpIpv6Info.l3Addresses;
-    auto found = std::find_if(records.begin(), records.end(), [&address](const L3Ipv6Address &a) {
-        return a.address == address.address;
-    });
+    auto found = std::find_if(records.begin(), records.end(),
+                              [&address](const L3Ipv6Address &a) { return a.address == address.address; });
     if (header->nlmsg_type == RTM_DELADDR) {
         if (found != records.end()) {
             records.erase(found);

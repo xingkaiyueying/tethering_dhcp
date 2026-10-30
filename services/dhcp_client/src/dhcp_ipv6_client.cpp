@@ -26,6 +26,7 @@
 #include "securec.h"
 #include "dhcp_logger.h"
 #include "dhcp_ipv6_client.h"
+#include <chrono>
 #include "dhcp_result.h"
 #include "dhcp_thread.h"
 #include "dhcp_function.h"
@@ -731,7 +732,10 @@ int DhcpIpv6Client::StartIpv6()
     }
     uint8_t *buff = (uint8_t*)malloc(KERNEL_BUFF_SIZE * sizeof(uint8_t));
     if (layer3_) {
-        struct { nlmsghdr header; ifaddrmsg address; } request{};
+        struct {
+            nlmsghdr header;
+            ifaddrmsg address;
+        } request{};
         request.header.nlmsg_len = NLMSG_LENGTH(sizeof(ifaddrmsg));
         request.header.nlmsg_type = RTM_GETADDR;
         request.header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;

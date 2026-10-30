@@ -121,7 +121,7 @@ void DhcpClientStateMachine::RunGetIPThreadFunc(const DhcpClientStateMachine &in
 int DhcpClientStateMachine::InitConfig(const std::string &ifname, bool isIpv6)
 {
     DHCP_LOGI("[DHCP][StateMachine] init begin, ifname:%{public}s mode:%{public}u", ifname.c_str(),
-        static_cast<uint8_t>(m_routerCfg.linkMode));
+              static_cast<uint8_t>(m_routerCfg.linkMode));
     if (InitSpecifiedClientCfg(ifname, isIpv6) != DHCP_OPT_SUCCESS) {
         DHCP_LOGE("[DHCP][StateMachine] init failed at client configuration, ifname:%{public}s", ifname.c_str());
         return DHCP_OPT_FAILED;
@@ -250,27 +250,29 @@ int DhcpClientStateMachine::GetClientNetworkInfo(void)
         m_cltCnf.ifaceIndex = static_cast<int>(if_nametoindex(m_cltCnf.ifaceName));
         if (m_cltCnf.ifaceIndex == 0) {
             DHCP_LOGE("[DHCP][L3Tun] identity failed at if_nametoindex, ifname:%{public}s errno:%{public}d",
-                m_cltCnf.ifaceName, errno);
+                      m_cltCnf.ifaceName, errno);
             return DHCP_OPT_FAILED;
         }
         int socketFd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
         struct ifreq request = {};
         if (socketFd < 0) {
             DHCP_LOGE("[DHCP][L3Tun] identity failed at control socket, ifname:%{public}s errno:%{public}d",
-                m_cltCnf.ifaceName, errno);
+                      m_cltCnf.ifaceName, errno);
             return DHCP_OPT_FAILED;
         }
         if (strncpy_s(request.ifr_name, sizeof(request.ifr_name), m_cltCnf.ifaceName, IFNAMSIZ - 1) != EOK) {
             close(socketFd);
             DHCP_LOGE("[DHCP][L3Tun] identity failed while copying interface name, ifname:%{public}s",
-                m_cltCnf.ifaceName);
+                      m_cltCnf.ifaceName);
             return DHCP_OPT_FAILED;
         }
         if (ioctl(socketFd, SIOCGIFFLAGS, &request) < 0) {
             int error = errno;
             close(socketFd);
-            DHCP_LOGE("[DHCP][L3Tun] identity failed while reading interface flags, ifname:%{public}s "
-                "errno:%{public}d", m_cltCnf.ifaceName, error);
+            DHCP_LOGE(
+                "[DHCP][L3Tun] identity failed while reading interface flags, ifname:%{public}s "
+                "errno:%{public}d",
+                m_cltCnf.ifaceName, error);
             return DHCP_OPT_FAILED;
         }
         close(socketFd);
@@ -279,17 +281,16 @@ int DhcpClientStateMachine::GetClientNetworkInfo(void)
             return DHCP_OPT_FAILED;
         }
         if (memcpy_s(m_cltCnf.ifaceMac, sizeof(m_cltCnf.ifaceMac), m_routerCfg.clientKey.data(),
-            m_routerCfg.clientKey.size()) != EOK) {
-            DHCP_LOGE("[DHCP][L3Tun] identity failed while copying client key, ifname:%{public}s",
-                m_cltCnf.ifaceName);
+                     m_routerCfg.clientKey.size()) != EOK) {
+            DHCP_LOGE("[DHCP][L3Tun] identity failed while copying client key, ifname:%{public}s", m_cltCnf.ifaceName);
             return DHCP_OPT_FAILED;
         }
         DHCP_LOGI("[DHCP][L3Tun] identity selected, ifname:%{public}s ifindex:%{public}d keyPresent:%{public}d",
-            m_cltCnf.ifaceName, m_cltCnf.ifaceIndex,
-            m_routerCfg.clientKey[0] != 0 || m_routerCfg.clientKey[1] != 0 || m_routerCfg.clientKey[2] != 0 ||
-                m_routerCfg.clientKey[3] != 0 || m_routerCfg.clientKey[4] != 0 || m_routerCfg.clientKey[5] != 0);
+                  m_cltCnf.ifaceName, m_cltCnf.ifaceIndex,
+                  m_routerCfg.clientKey[0] != 0 || m_routerCfg.clientKey[1] != 0 || m_routerCfg.clientKey[2] != 0 ||
+                      m_routerCfg.clientKey[3] != 0 || m_routerCfg.clientKey[4] != 0 || m_routerCfg.clientKey[5] != 0);
     } else if (GetLocalInterface(m_cltCnf.ifaceName, &m_cltCnf.ifaceIndex, m_cltCnf.ifaceMac, NULL) !=
-        DHCP_OPT_SUCCESS) {
+               DHCP_OPT_SUCCESS) {
         DHCP_LOGE("GetClientNetworkInfo() GetLocalInterface failed, ifaceName:%{public}s.", m_cltCnf.ifaceName);
         return DHCP_OPT_FAILED;
     }
@@ -633,10 +634,10 @@ void DhcpClientStateMachine::InitSelecting(time_t timestamp)
     int sendRet = DhcpDiscover(m_transID, m_requestedIp4);
     if (sendRet < 0) {
         DHCP_LOGE("[DHCP][StateMachine] DISCOVER send failed, ifname:%{public}s ret:%{public}d attempt:%{public}u",
-            m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
+                  m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
     } else {
         DHCP_LOGI("[DHCP][StateMachine] DISCOVER sent, ifname:%{public}s bytes:%{public}d attempt:%{public}u",
-            m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
+                  m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
     }
     m_dhcp4State = DHCP_STATE_SELECTING;
 
@@ -792,10 +793,10 @@ void DhcpClientStateMachine::Requesting(time_t timestamp)
         int sendRet = DhcpRequest(m_transID, m_requestedIp4, m_serverIp4);
         if (sendRet < 0) {
             DHCP_LOGE("[DHCP][StateMachine] REQUEST send failed, ifname:%{public}s ret:%{public}d attempt:%{public}u",
-                m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
+                      m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
         } else {
             DHCP_LOGI("[DHCP][StateMachine] REQUEST sent, ifname:%{public}s bytes:%{public}d attempt:%{public}u",
-                m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
+                      m_cltCnf.ifaceName, sendRet, m_sentPacketNum);
         }
     }
 
@@ -1338,16 +1339,15 @@ void DhcpClientStateMachine::DhcpAckOrNakPacketHandle(uint8_t type, struct DhcpP
         IpConflictDetect();
     } else {
         if (m_routerCfg.linkMode == DhcpLinkMode::L3_TUN) {
-            DHCP_LOGI("[DHCP][L3Tun] ACK accepted, skipping ARP and DECLINE, ifname:%{public}s",
-                m_cltCnf.ifaceName);
+            DHCP_LOGI("[DHCP][L3Tun] ACK accepted, skipping ARP and DECLINE, ifname:%{public}s", m_cltCnf.ifaceName);
         }
         if (PublishDhcpResultEvent(m_cltCnf.ifaceName, PUBLISH_CODE_SUCCESS, &m_dhcpIpResult) != DHCP_OPT_SUCCESS) {
             DHCP_LOGE("DhcpAckOrNakPacketHandle PublishDhcpResultEvent result failed!");
             return;
         }
         m_dhcp4State = DHCP_STATE_BOUND;
-        DHCP_LOGI("[DHCP][StateMachine] BOUND completed, ifname:%{public}s renewalSec:%{public}u",
-            m_cltCnf.ifaceName, m_renewalSec);
+        DHCP_LOGI("[DHCP][StateMachine] BOUND completed, ifname:%{public}s renewalSec:%{public}u", m_cltCnf.ifaceName,
+                  m_renewalSec);
         m_sentPacketNum = 0;
         m_resendTimer = 0;
         m_timeoutTimestamp = timestamp + static_cast<int64_t>(m_renewalSec);
@@ -1702,7 +1702,7 @@ int DhcpClientStateMachine::AddStrToOpts(struct DhcpPacket *packet, int option, 
 int DhcpClientStateMachine::DhcpDiscover(uint32_t transid, uint32_t requestip)
 {
     DHCP_LOGI("[DHCP][StateMachine] build DISCOVER, transid:%{public}u reqip:%{public}s", transid,
-        IntIpv4ToAnonymizeStr(requestip).c_str());
+              IntIpv4ToAnonymizeStr(requestip).c_str());
     struct DhcpPacket packet;
     if (memset_s(&packet, sizeof(struct DhcpPacket), 0, sizeof(struct DhcpPacket)) != EOK) {
         DHCP_LOGE("[DHCP][StateMachine] build DISCOVER failed at packet initialization");
@@ -1723,7 +1723,7 @@ int DhcpClientStateMachine::DhcpDiscover(uint32_t transid, uint32_t requestip)
     AddOptValueToOpts(packet.options, MAXIMUM_DHCP_MESSAGE_SIZE_OPTION, MAX_MSG_SIZE); // 57
     AddParamaterRequestList(&packet); // 55
     DHCP_LOGI("[DHCP][StateMachine] transmit DISCOVER by broadcast, ifname:%{public}s ifindex:%{public}d",
-        m_cltCnf.ifaceName, m_cltCnf.ifaceIndex);
+              m_cltCnf.ifaceName, m_cltCnf.ifaceIndex);
     return SendToDhcpPacket(&packet, INADDR_ANY, INADDR_BROADCAST, m_cltCnf.ifaceIndex, (uint8_t *)MAC_BCAST_ADDR);
 }
 
@@ -1731,7 +1731,7 @@ int DhcpClientStateMachine::DhcpDiscover(uint32_t transid, uint32_t requestip)
 int DhcpClientStateMachine::DhcpRequest(uint32_t transid, uint32_t reqip, uint32_t servip)
 {
     DHCP_LOGI("[DHCP][StateMachine] build REQUEST, transid:%{public}u reqip:%{public}s servip:%{public}s", transid,
-        IntIpv4ToAnonymizeStr(reqip).c_str(), IntIpv4ToAnonymizeStr(servip).c_str());
+              IntIpv4ToAnonymizeStr(reqip).c_str(), IntIpv4ToAnonymizeStr(servip).c_str());
     struct DhcpPacket packet;
     if (memset_s(&packet, sizeof(struct DhcpPacket), 0, sizeof(struct DhcpPacket)) != EOK) {
         DHCP_LOGE("[DHCP][StateMachine] build REQUEST failed at packet initialization");
@@ -1754,7 +1754,7 @@ int DhcpClientStateMachine::DhcpRequest(uint32_t transid, uint32_t reqip, uint32
     AddOptValueToOpts(packet.options, MAXIMUM_DHCP_MESSAGE_SIZE_OPTION, MAX_MSG_SIZE); //57
     AddParamaterRequestList(&packet); // 55
     DHCP_LOGI("[DHCP][StateMachine] transmit REQUEST by broadcast, ifname:%{public}s ifindex:%{public}d",
-        m_cltCnf.ifaceName, m_cltCnf.ifaceIndex);
+              m_cltCnf.ifaceName, m_cltCnf.ifaceIndex);
     return SendToDhcpPacket(&packet, INADDR_ANY, INADDR_BROADCAST, m_cltCnf.ifaceIndex, (uint8_t *)MAC_BCAST_ADDR);
 }
 
@@ -1788,9 +1788,8 @@ int DhcpClientStateMachine::DhcpRenew(uint32_t transid, uint32_t clientip, uint3
             AddOptValueToOpts(packet.options, SERVER_IDENTIFIER_OPTION, serverip);
         }
         DHCP_LOGI("[DHCP][L3Tun] transmit renewal by broadcast with stable identity, ifname:%{public}s",
-            m_cltCnf.ifaceName);
-        return SendToDhcpPacket(&packet, INADDR_ANY, INADDR_BROADCAST, m_cltCnf.ifaceIndex,
-            (uint8_t *)MAC_BCAST_ADDR);
+                  m_cltCnf.ifaceName);
+        return SendToDhcpPacket(&packet, INADDR_ANY, INADDR_BROADCAST, m_cltCnf.ifaceIndex, (uint8_t *)MAC_BCAST_ADDR);
     }
 
     /* Begin broadcast or unicast dhcp request packet. */

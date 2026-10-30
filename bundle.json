@@ -112,8 +112,7 @@
             ],
             "test": [
                 "//foundation/communication/dhcp/test/unittest:dhcp_unittest",
-                "//foundation/communication/dhcp/test/fuzztest:fuzztest",
-                "//foundation/communication/dhcp/test/mytest:sleip_dhcp_stage2"
+                "//foundation/communication/dhcp/test/fuzztest:fuzztest"
             ]
         },
         "hisysevent_config": [
