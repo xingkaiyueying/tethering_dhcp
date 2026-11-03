@@ -35,6 +35,7 @@
 #include "address_utils.h"
 #include "common_util.h"
 #include "dhcp_address_pool.h"
+#include "dhcp_nearlink_scope.h"
 #include "dhcp_binding.h"
 #include "dhcp_config.h"
 #include "dhcp_define.h"
@@ -421,6 +422,7 @@ int SendDhcpReply(PDhcpServerContext ctx, int replyType, PDhcpMsgInfo reply)
 
 static int MessageProcess(PDhcpServerContext ctx, PDhcpMsgInfo received, PDhcpMsgInfo reply)
 {
+    NearlinkDhcpBindingScope scope(ctx ? ctx->ifname : nullptr);
     DHCP_LOGI("start %{public}s %{public}d", __func__, __LINE__);
     int replyType = REPLY_NONE;
     if (!received) {
@@ -607,6 +609,7 @@ static int CheckAddressRange(DhcpAddressPool *pool)
 
 void InitBindingRecoders(DhcpAddressPool *pool)
 {
+    NearlinkDhcpBindingScope scope(pool ? pool->ifname : nullptr);
     if (!pool) {
         DHCP_LOGE("address pool pointer is null.");
         return;
@@ -904,6 +907,7 @@ static void AddReplyMessageTypeOption(PDhcpMsgInfo reply, uint8_t replyMessageTy
 
 AddressBinding *GetBinding(DhcpAddressPool *pool, PDhcpMsgInfo received)
 {
+    NearlinkDhcpBindingScope scope(pool ? pool->ifname : nullptr);
     if (!pool) {
         return nullptr;
     }
@@ -911,6 +915,15 @@ AddressBinding *GetBinding(DhcpAddressPool *pool, PDhcpMsgInfo received)
         return nullptr;
     }
     AddressBinding *binding = pool->binding(received->packet.chaddr, &received->options);
+    if (binding && !IpInRange(binding->ipAddress, pool->addressRange.beginAddress,
+                             pool->addressRange.endAddress, pool->netmask)) {
+        // A shared link may select a new subnet after an upstream conflict.
+        // Keep the client identity and allocate from this server's active pool.
+        binding->ipAddress = pool->distribue(pool, received->packet.chaddr);
+        binding->bindingStatus = BIND_PENDING;
+        DHCP_LOGI("[SharedTun] rebinding in active pool iface=%{public}s xid=%{public}u",
+                  pool->ifname, received->packet.xid);
+    }
     if (!binding) {
         binding = pool->newBinding(received->packet.chaddr, &received->options);
         if (binding == nullptr) {
@@ -1645,7 +1658,17 @@ static int32_t TransmitOfferOrAckPacket(PDhcpServerContext ctx, PDhcpMsgInfo rep
     int ret = 0;
     sockaddr_in *bcastAddrIn = BroadcastAddrIn();
     sockaddr_in *destAddrIn = DestinationAddrIn();
-    if (srvIns->broadCastFlagEnable == 1 && destAddrIn) {
+    bool sharedTun = strcmp(ctx->ifname, "sleip0") == 0;
+    if (sharedTun) {
+        if (reply->length <= 0 || reply->length > REPLY_PACKET_MAX_LEN) {
+            return RET_FAILED;
+        }
+        // The NearLink dispatcher resolves chaddr+xid, including broadcast replies.
+        ret = sendto(srvIns->serverFd, &reply->packet, reply->length, 0,
+                     reinterpret_cast<struct sockaddr *>(bcastAddrIn), sizeof(*bcastAddrIn));
+        DHCP_LOGI("[SharedTun] reply iface=%{public}s xid=%{public}u bytes=%{public}d result=%{public}d",
+                  ctx->ifname, reply->packet.xid, reply->length, ret);
+    } else if (srvIns->broadCastFlagEnable == 1 && destAddrIn) {
         bool broadCastFlag = GetBroadCastFlag(reply);
         DHCP_LOGI("TransmitOfferOrAckPacket, broadCastFlag: %{public}d", broadCastFlag);
         if (!broadCastFlag) {
@@ -1680,7 +1703,7 @@ static int32_t TransmitOfferOrAckPacket(PDhcpServerContext ctx, PDhcpMsgInfo rep
             srvIns->serverFd, &reply->packet, reply->length, 0, reinterpret_cast<struct sockaddr *>(bcastAddrIn),
                 sizeof(*bcastAddrIn));
     }
-    if (!ret) {
+    if (ret != reply->length) {
         DHCP_LOGE("failed to send dhcp message.");
         return RET_FAILED;
     }
