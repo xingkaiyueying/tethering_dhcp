@@ -100,8 +100,6 @@ void DhcpClientCallBack::ResultInfoCopyExt(DhcpResult &dhcpResult, OHOS::DHCP::D
 void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifname, OHOS::DHCP::DhcpResult& result)
     __attribute__((no_sanitize("cfi")))
 {
-    DHCP_LOGI("[DHCP][CAdapter] success callback received, ifname:%{public}s status:%{public}d",
-        ifname.c_str(), status);
     DhcpResult dhcpResult{};
     dhcpResult.iptype = result.iptype;
     dhcpResult.isOptSuc = result.isOptSuc;
@@ -117,7 +115,6 @@ void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifnam
         result.vectorDnsAddr.size());
 
     std::lock_guard<std::mutex> autoLock(callBackMutex);
-    auto l3 = l3Callbacks.find(ifname);
     DhcpL3Ipv6Snapshot snapshot{};
     if (result.l3Ipv6 && result.l3Addresses.size() <= 8) {
         for (const auto &address : result.l3Addresses) {
@@ -127,7 +124,6 @@ void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifnam
             out.preferredLifetime = address.preferredLifetime; out.validLifetime = address.validLifetime;
             ++snapshot.addressCount;
         }
-        if (l3 != l3Callbacks.end() && l3->second) l3->second(ifname.c_str(), &snapshot);
     }
     if (sessionSuccess) {
         sessionSuccess(sessionGeneration, status, ifname.c_str(), &dhcpResult, result.l3Ipv6 ? &snapshot : nullptr);
@@ -136,8 +132,6 @@ void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifnam
     auto iter = mapClientCallBack.find(ifname);
     if ((iter != mapClientCallBack.end()) && (iter->second != nullptr) &&
         (iter->second->OnIpSuccessChanged != nullptr)) {
-        DHCP_LOGI("[DHCP][CAdapter] dispatch success callback, ifname:%{public}s status:%{public}d",
-            ifname.c_str(), status);
         iter->second->OnIpSuccessChanged(status, ifname.c_str(), &dhcpResult);
     } else {
         DHCP_LOGE("[DHCP][CAdapter] success callback dispatch failed: handler not found, ifname:%{public}s",
@@ -148,16 +142,12 @@ void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifnam
 void DhcpClientCallBack::OnIpFailChanged(int status, const std::string& ifname, const std::string& reason)
     __attribute__((no_sanitize("cfi")))
 {
-    DHCP_LOGI("[DHCP][CAdapter] failure callback received, ifname:%{public}s status:%{public}d reason:%{public}s",
-        ifname.c_str(), status, reason.c_str());
     std::lock_guard<std::mutex> autoLock(callBackMutex);
     if (sessionFailure) {
         sessionFailure(sessionGeneration, status, ifname.c_str(), reason.c_str()); return;
     }
     auto iter = mapClientCallBack.find(ifname);
     if ((iter != mapClientCallBack.end()) && (iter->second != nullptr) && (iter->second->OnIpFailChanged != nullptr)) {
-        DHCP_LOGI("[DHCP][CAdapter] dispatch failure callback, ifname:%{public}s status:%{public}d",
-            ifname.c_str(), status);
         iter->second->OnIpFailChanged(status, ifname.c_str(), reason.c_str());
     } else {
         DHCP_LOGE("[DHCP][CAdapter] failure callback dispatch failed: handler not found, ifname:%{public}s",
@@ -220,7 +210,6 @@ void DhcpClientCallBack::UnRegisterCallBack(const std::string& ifname)
         return;
     }
     std::lock_guard<std::mutex> autoLock(callBackMutex);
-    l3Callbacks.erase(ifname);
     auto iter = mapClientCallBack.find(ifname);
     if (iter != mapClientCallBack.end()) {
         mapClientCallBack.erase(iter);

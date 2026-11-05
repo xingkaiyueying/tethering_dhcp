@@ -43,7 +43,6 @@ NO_SANITIZE("cfi")  DhcpErrorCode RegisterDhcpClientCallBack(const char *ifname,
         DHCP_LOGE("[DHCP][CAdapter] register callback failed: invalid parameter");
         return DHCP_INVALID_PARAM;
     }
-    DHCP_LOGI("[DHCP][CAdapter] register callback begin, ifname:%{public}s", ifname);
     if (dhcpClientPtr == nullptr) {
         dhcpClientPtr = OHOS::DHCP::DhcpClient::GetInstance(DHCP_CLIENT_ABILITY_ID);
     }
@@ -66,7 +65,6 @@ NO_SANITIZE("cfi")  DhcpErrorCode RegisterDhcpClientCallBack(const char *ifname,
     }
     dhcpClientCallBack->RegisterCallBack(ifname, event);
     DhcpErrorCode ret = GetCErrorCode(dhcpClientPtr->RegisterDhcpClientCallBack(ifname, dhcpClientCallBack));
-    DHCP_LOGI("[DHCP][CAdapter] register callback complete, ifname:%{public}s ret:%{public}d", ifname, ret);
     return ret;
 }
 
@@ -112,7 +110,6 @@ NO_SANITIZE("cfi") static DhcpErrorCode StartDhcpClientWithMode(const RouterConf
         DHCP_LOGE("[DHCP][CAdapter] start failed: callback must be registered first");
         return DHCP_INVALID_PARAM;
     }
-    DHCP_LOGI("[DHCP][CAdapter] start begin, ifname:%{public}s mode:%{public}u", config.ifname, clientKey == nullptr ? 0 : 1);
     OHOS::DHCP::RouterConfig routerConfig;
     routerConfig.ifname = config.ifname;
     routerConfig.bssid = config.bssid;
@@ -125,8 +122,6 @@ NO_SANITIZE("cfi") static DhcpErrorCode StartDhcpClientWithMode(const RouterConf
         OHOS::DHCP::StartDhcpClientL3Internal(routerConfig, clientKey, DHCP_CLIENT_KEY_LEN));
     if (ret != DHCP_SUCCESS) {
         DHCP_LOGE("[DHCP][CAdapter] start failed, ifname:%{public}s ret:%{public}d", config.ifname, ret);
-    } else {
-        DHCP_LOGI("[DHCP][CAdapter] start accepted, ifname:%{public}s", config.ifname);
     }
     return ret;
 }
@@ -143,16 +138,6 @@ NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClientL3(const RouterConfig *config,
         return DHCP_INVALID_PARAM;
     }
     return StartDhcpClientWithMode(*config, clientKey);
-}
-
-NO_SANITIZE("cfi") DhcpErrorCode RegisterDhcpClientL3Ipv6CallBack(const char *ifname,
-    void (*callback)(const char *, const DhcpL3Ipv6Snapshot *))
-{
-    if (!ifname || !dhcpClientCallBack) return DHCP_INVALID_PARAM;
-    std::lock_guard<std::mutex> lock(dhcpClientCallBack->callBackMutex);
-    if (callback) dhcpClientCallBack->l3Callbacks[ifname] = callback;
-    else dhcpClientCallBack->l3Callbacks.erase(ifname);
-    return DHCP_SUCCESS;
 }
 
 DhcpErrorCode DealWifiDhcpCache(int32_t cmd, const IpCacheInfo &ipCacheInfo)

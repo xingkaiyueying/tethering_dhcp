@@ -1666,8 +1666,6 @@ static int32_t TransmitOfferOrAckPacket(PDhcpServerContext ctx, PDhcpMsgInfo rep
         // The NearLink dispatcher resolves chaddr+xid, including broadcast replies.
         ret = sendto(srvIns->serverFd, &reply->packet, reply->length, 0,
                      reinterpret_cast<struct sockaddr *>(bcastAddrIn), sizeof(*bcastAddrIn));
-        DHCP_LOGI("[SharedTun] reply iface=%{public}s xid=%{public}u bytes=%{public}d result=%{public}d",
-                  ctx->ifname, reply->packet.xid, reply->length, ret);
     } else if (srvIns->broadCastFlagEnable == 1 && destAddrIn) {
         bool broadCastFlag = GetBroadCastFlag(reply);
         DHCP_LOGI("TransmitOfferOrAckPacket, broadCastFlag: %{public}d", broadCastFlag);

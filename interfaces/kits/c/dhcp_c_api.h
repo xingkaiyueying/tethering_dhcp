@@ -60,8 +60,6 @@ extern "C" {
         void (*success)(uint64_t, int, const char *, const DhcpResult *, const DhcpL3Ipv6Snapshot *),
         void (*failure)(uint64_t, int, const char *, const char *));
 
-    DhcpErrorCode RegisterDhcpClientL3Ipv6CallBack(const char *ifname,
-        void (*callback)(const char *, const DhcpL3Ipv6Snapshot *));
 
     /**
      * @Description : add dhcp cache

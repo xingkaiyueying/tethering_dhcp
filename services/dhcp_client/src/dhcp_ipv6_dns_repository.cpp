@@ -44,7 +44,7 @@ bool DnsServerRepository::Clear()
 bool DnsServerRepository::Expire()
 {
     std::lock_guard<std::mutex> lock(mutex);
-    return UpdateCurrentServers();
+    return UpdateCurrentServers(true);
 }
 
 bool DnsServerRepository::AddServers(uint32_t lifetime, const std::vector<std::string>& addresses)
@@ -128,7 +128,7 @@ bool DnsServerRepository::UpdateExistingEntry(const std::string& address, uint64
     return false;
 }
 
-bool DnsServerRepository::UpdateCurrentServers()
+bool DnsServerRepository::UpdateCurrentServers(bool maintenance)
 {
     uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()
@@ -139,7 +139,9 @@ bool DnsServerRepository::UpdateCurrentServers()
         return changed;
     }
     for (int i = static_cast<int>(allServers_.size()) - 1; i >= 0; --i) {
-        DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() %{public}d", i);
+        if (!maintenance) {
+            DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() %{public}d", i);
+        }
         if (static_cast<size_t>(i) >= allLimit_ || allServers_[i].expiry <= now) {
             DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() remove server %{private}s", allServers_[i].address.c_str());
             // remove expired or too many servers
@@ -155,8 +157,13 @@ bool DnsServerRepository::UpdateCurrentServers()
 
     for (const DnsServerEntry& entry : allServers_) {
         if (currentServers_.size() < currentLimit_) {
-            DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() add server %{private}s", entry.address.c_str());
+            if (!maintenance) {
+                DHCP_LOGI("DhcpIpv6 UpdateCurrentServers() add server %{private}s", entry.address.c_str());
+            }
             if (currentServers_.insert(entry.address).second) {
+                if (maintenance) {
+                    DHCP_LOGI("DhcpIpv6 DNS set added server %{private}s", entry.address.c_str());
+                }
                 changed = true;
             }
         } else {
