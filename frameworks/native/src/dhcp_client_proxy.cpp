@@ -97,7 +97,6 @@ bool DhcpClientProxy::IsRemoteDied(void)
 ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
     const sptr<IDhcpClientCallBack> &callback)
 {
-    DHCP_LOGI("[DHCP][ClientProxy] register callback begin, ifname:%{public}s", ifname.c_str());
     if (mRemoteDied) {
         DHCP_LOGE("[DHCP][ClientProxy] register callback failed: remote service died");
         return DHCP_E_FAILED;
@@ -140,14 +139,11 @@ ErrCode DhcpClientProxy::RegisterDhcpClientCallBack(const std::string& ifname,
         DHCP_LOGE("[DHCP][ClientProxy] register callback service failed, ret:%{public}d", static_cast<int32_t>(ret));
         return ret;
     }
-    DHCP_LOGI("[DHCP][ClientProxy] register callback succeeded, ifname:%{public}s", ifname.c_str());
     return ret;
 }
 
 ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
 {
-    DHCP_LOGI("[DHCP][ClientProxy] start begin, ifname:%{public}s mode:%{public}u remoteDied:%{public}d",
-              config.ifname.c_str(), static_cast<uint8_t>(config.linkMode), mRemoteDied);
     if (mRemoteDied) {
         DHCP_LOGE("[DHCP][ClientProxy] start failed: remote service died");
         return DHCP_E_FAILED;
@@ -188,10 +184,8 @@ ErrCode DhcpClientProxy::StartDhcpClient(const RouterConfig &config)
     }
     ErrCode ret = static_cast<ErrCode>(reply.ReadInt32());
     if (ret != DHCP_E_SUCCESS) {
-        DHCP_LOGE("[DHCP][ClientProxy] start service failed, ifname:%{public}s ret:%{public}d", config.ifname.c_str(),
-                  static_cast<int32_t>(ret));
-    } else {
-        DHCP_LOGI("[DHCP][ClientProxy] start accepted, ifname:%{public}s", config.ifname.c_str());
+        DHCP_LOGE("[DHCP][ClientProxy] start service failed, ifname:%{public}s ret:%{public}d",
+            config.ifname.c_str(), static_cast<int32_t>(ret));
     }
     return ret;
 }

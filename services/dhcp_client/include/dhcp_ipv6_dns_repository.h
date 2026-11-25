@@ -44,7 +44,7 @@ public:
     bool SetCurrentServers(DhcpIpv6Info &ipv6Info); //set current servers to ipv6Info
 private:
     bool UpdateExistingEntry(const std::string& address, uint64_t expiry);
-    bool UpdateCurrentServers();
+    bool UpdateCurrentServers(bool maintenance = false);
 };
 }
 }

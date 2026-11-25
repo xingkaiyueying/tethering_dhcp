@@ -75,10 +75,11 @@ std::size_t macAddrHash(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 
 AddressBinding *GetBindingByMac(uint8_t macAddr[DHCP_HWADDR_LENGTH])
 {
-    std::size_t hash = macAddrHash(macAddr);
     std::lock_guard<std::mutex> autoLock(g_bindingMapMutex);
-    if (BindingRecords().count(hash) > 0) {
-        return &BindingRecords()[hash];
+    auto &records = BindingRecords();
+    auto binding = records.find(macAddrHash(macAddr));
+    if (binding != records.end() && memcmp(binding->second.chaddr, macAddr, DHCP_HWADDR_LENGTH) == 0) {
+        return &binding->second;
     }
     return nullptr;
 }

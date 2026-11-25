@@ -38,10 +38,6 @@ extern "C" {
 #define DHCP_ADDR_MAX_NUMBER 16
 #define DHCP_CLIENT_KEY_LEN 6
 
-typedef enum DhcpLinkMode {
-    DHCP_LINK_MODE_L2_PACKET = 0,
-    DHCP_LINK_MODE_L3_TUN = 1,
-} DhcpLinkMode;
 #define DHCP_ADDR_DATA_MAX_LEN 128
 #define INTERFACE_MAX_LEN 32
 #define SSID_MAX_LEN 32
