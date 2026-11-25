@@ -11,9 +11,11 @@ with tempfile.TemporaryDirectory(prefix='p2-dhcp-') as directory:
     put('securec.h', '''#pragma once
 #include <cstring>
 #define EOK 0
-inline int memcpy_s(void*d,size_t n,const void*s,size_t k){if(k>n)return -1;memcpy(d,s,k);return 0;}
+inline int MockMemcpyS(void*d,size_t n,const void*s,size_t k){if(k>n)return -1;memcpy(d,s,k);return 0;}
+#define memcpy_s MockMemcpyS
 inline int memset_s(void*d,size_t n,int c,size_t k){if(k>n)return -1;memset(d,c,k);return 0;}
-inline int strcpy_s(char*d,size_t n,const char*s){if(strlen(s)>=n)return -1;strcpy(d,s);return 0;}
+inline int MockStrcpyS(char*d,size_t n,const char*s){if(strlen(s)>=n)return -1;strcpy(d,s);return 0;}
+#define strcpy_s MockStrcpyS
 ''')
     production = (repo/'services/dhcp_client/src/dhcp_ipv6_event.cpp').read_text(encoding='utf-8')
     parser = production.split('bool DhcpIpv6Client::ParseL3Address(void *msg)', 1)[1].split(
@@ -27,7 +29,19 @@ inline int strcpy_s(char*d,size_t n,const char*s){if(strlen(s)>=n)return -1;strc
 #include <iostream>
 #include <cstdint>
 #include <chrono>
+#include <cstdio>
 #include "securec.h"
+std::vector<std::string> timingLogs;
+template<class... Args> void CaptureLog(std::string format, Args... args)
+{
+ for (const auto *tag : {"{public}", "{private}"}) {
+  size_t pos;while((pos=format.find(tag))!=std::string::npos)format.erase(pos,strlen(tag));
+ }
+ char message[2048]{};snprintf(message,sizeof(message),format.c_str(),args...);
+ timingLogs.emplace_back(message);
+}
+#define DHCP_LOGI(...) CaptureLog(__VA_ARGS__)
+std::string Ipv6Anonymize(const std::string &){return "fd**::**";}
 constexpr int AF_INET6=10, DHCP_INET6_ADDRSTRLEN=128;
 constexpr int IFA_ADDRESS=1, IFA_CACHEINFO=6, IFA_FLAGS=8, IFA_F_TENTATIVE=0x40, IFA_F_DADFAILED=8;
 constexpr int RTM_NEWADDR=20, RTM_DELADDR=21;
@@ -46,6 +60,7 @@ struct ifa_cacheinfo{uint32_t ifa_prefered,ifa_valid,created,updated;};
 struct L3Ipv6Address{std::string address;uint64_t observedAt=0;uint32_t ifindex=0,prefixLength=0,flags=0,preferredLifetime=0,validLifetime=0;};
 enum class AddrType{GLOBAL};
 struct DhcpIpv6Client {
+ std::string interfaceName="sleip0";
  std::mutex mutex_;
  struct {std::vector<L3Ipv6Address> l3Addresses;std::map<std::string,int> IpAddrMap;bool l3Ipv6=false;} dhcpIpv6Info;
  int GetIpFromS6Address(void*p,int,char*out,int n){return strcpy_s(out,n,("fd77::"+std::to_string(((uint8_t*)p)[15])).c_str());}
@@ -64,10 +79,16 @@ int main(){
  assert(client.ParseL3Address(&msg)); auto &s=client.dhcpIpv6Info;
  assert(s.l3Addresses.size()==1 && s.IpAddrMap.empty());
  assert(s.l3Addresses[0].preferredLifetime==30 && s.l3Addresses[0].flags==IFA_F_TENTATIVE);
+ assert(timingLogs.empty());
+ msg.life.ifa_valid=100;assert(client.ParseL3Address(&msg));
+ assert(timingLogs.empty());
+ msg.life.ifa_valid=90;
  msg.flags=0; assert(client.ParseL3Address(&msg) && s.IpAddrMap.size()==1);
+ assert(timingLogs.empty());
  msg.address[15]=3; msg.flags=IFA_F_DADFAILED;
  assert(client.ParseL3Address(&msg) && s.IpAddrMap.size()==1 && s.l3Addresses.size()==2);
  msg.header.nlmsg_type=RTM_DELADDR; assert(client.ParseL3Address(&msg) && s.l3Addresses.size()==1);
+ assert(timingLogs.empty());
  msg.header.nlmsg_type=RTM_NEWADDR; msg.life.ifa_prefered=91;
  assert(!client.ParseL3Address(&msg) && s.l3Addresses.size()==1);
  msg.life.ifa_prefered=30; msg.addressAttr.rta_len=19; assert(!client.ParseL3Address(&msg));
@@ -79,7 +100,7 @@ int main(){
 ''')
     subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(out),str(out/'parser.cpp'),'-o',str(out/'parser.exe')],check=True)
     subprocess.run([str(out/'parser.exe')],check=True)
-    put('dhcp_logger.h', '#define DEFINE_DHCPLOG_DHCP_LABEL(...)\n#define DHCP_LOGI(...) ((void)0)\n#define DHCP_LOGE(...) ((void)0)\n')
+    put('dhcp_logger.h', '#pragma once\ninline unsigned dnsInfoLogs=0;\n#define DEFINE_DHCPLOG_DHCP_LABEL(...)\n#define DHCP_LOGI(...) (++dnsInfoLogs)\n#define DHCP_LOGE(...) ((void)0)\n')
     put('dhcp_ipv6_define.h', '')
     put('dhcp_ipv6_info.h', '''#pragma once
 #include <algorithm>
@@ -103,6 +124,9 @@ struct DnsServerEntry{std::string address;uint64_t expiry;};
 int main(){using namespace OHOS::DHCP;DnsServerRepository r(0);DhcpIpv6Info info;
  assert(r.AddServers(30,{"fd77::53"})); assert(r.AddServers(1,{"fd77::54"}));
  assert(r.SetCurrentServers(info) && info.vectorDnsAddr.size()==2);
+ auto logsBefore=dnsInfoLogs;
+ for(int n=0;n<100;++n)assert(!r.Expire());
+ assert(dnsInfoLogs==logsBefore); // periodic checks preserve the set and stay quiet
  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
  assert(r.Expire());r.SetCurrentServers(info);assert(info.vectorDnsAddr.size()==1 && info.vectorDnsAddr[0]=="fd77::53");
  assert(r.AddServers(0,{"fd77::53"}));r.SetCurrentServers(info);assert(info.vectorDnsAddr.empty());

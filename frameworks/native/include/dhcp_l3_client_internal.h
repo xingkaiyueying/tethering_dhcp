@@ -15,9 +15,9 @@
 #ifndef DHCP_L3_CLIENT_INTERNAL_H
 #define DHCP_L3_CLIENT_INTERNAL_H
 
-#include <cstdint>
 #include "dhcp_define.h"
 #include "dhcp_errcode.h"
+#include <cstdint>
 
 namespace OHOS {
 namespace DHCP {

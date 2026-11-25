@@ -37,11 +37,15 @@ public:
     virtual ~DhcpIpv6Client();
 
     bool IsRunning();
-    bool IsLayer3() const { return layer3_; }
+    bool IsLayer3() const
+    {
+        return layer3_;
+    }
     void SetLayer3(bool enabled)
     {
         layer3_ = enabled;
-        if (enabled) dhcpIpv6DnsRepository_ = std::make_unique<DnsServerRepository>(0, 4, 4);
+        if (enabled)
+            dhcpIpv6DnsRepository_ = std::make_unique<DnsServerRepository>(0, 4, 4);
     }
     void SetCallback(std::function<void(const std::string ifname, DhcpIpv6Info &info)> callback);
     void SetRaFlagsCallback(std::function<void(const std::string ifname, bool managed, bool other)> callback);

@@ -119,9 +119,13 @@ void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifnam
     if (result.l3Ipv6 && result.l3Addresses.size() <= 8) {
         for (const auto &address : result.l3Addresses) {
             auto &out = snapshot.addresses[snapshot.addressCount];
-            if (strcpy_s(out.address, sizeof(out.address), address.address.c_str()) != EOK) return;
-            out.ifindex = address.ifindex; out.prefixLength = address.prefixLength; out.flags = address.flags;
-            out.preferredLifetime = address.preferredLifetime; out.validLifetime = address.validLifetime;
+            if (strcpy_s(out.address, sizeof(out.address), address.address.c_str()) != EOK)
+                return;
+            out.ifindex = address.ifindex;
+            out.prefixLength = address.prefixLength;
+            out.flags = address.flags;
+            out.preferredLifetime = address.preferredLifetime;
+            out.validLifetime = address.validLifetime;
             ++snapshot.addressCount;
         }
     }
@@ -135,7 +139,7 @@ void DhcpClientCallBack::OnIpSuccessChanged(int status, const std::string& ifnam
         iter->second->OnIpSuccessChanged(status, ifname.c_str(), &dhcpResult);
     } else {
         DHCP_LOGE("[DHCP][CAdapter] success callback dispatch failed: handler not found, ifname:%{public}s",
-            ifname.c_str());
+                  ifname.c_str());
     }
 }
 
@@ -144,14 +148,15 @@ void DhcpClientCallBack::OnIpFailChanged(int status, const std::string& ifname, 
 {
     std::lock_guard<std::mutex> autoLock(callBackMutex);
     if (sessionFailure) {
-        sessionFailure(sessionGeneration, status, ifname.c_str(), reason.c_str()); return;
+        sessionFailure(sessionGeneration, status, ifname.c_str(), reason.c_str());
+        return;
     }
     auto iter = mapClientCallBack.find(ifname);
     if ((iter != mapClientCallBack.end()) && (iter->second != nullptr) && (iter->second->OnIpFailChanged != nullptr)) {
         iter->second->OnIpFailChanged(status, ifname.c_str(), reason.c_str());
     } else {
         DHCP_LOGE("[DHCP][CAdapter] failure callback dispatch failed: handler not found, ifname:%{public}s",
-            ifname.c_str());
+                  ifname.c_str());
     }
 }
 #ifndef OHOS_ARCH_LITE

@@ -148,8 +148,8 @@ int DhcpClientStub::OnStartDhcpClient(uint32_t code, IpcIo *req, IpcIo *reply)
     if (req->bufferLeft != 0) {
         int32_t linkMode = 0;
         int32_t clientKeyLen = 0;
-        if (!ReadInt32(req, &linkMode) || !ReadInt32(req, &clientKeyLen) ||
-            linkMode < 0 || linkMode > static_cast<int32_t>(DhcpLinkMode::L3_TUN) ||
+        if (!ReadInt32(req, &linkMode) || !ReadInt32(req, &clientKeyLen) || linkMode < 0 ||
+            linkMode > static_cast<int32_t>(DhcpLinkMode::L3_TUN) ||
             clientKeyLen != static_cast<int32_t>(config.clientKey.size())) {
             (void)WriteInt32(reply, 0);
             (void)WriteInt32(reply, DHCP_E_INVALID_PARAM);

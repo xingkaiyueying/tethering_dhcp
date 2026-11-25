@@ -68,20 +68,27 @@ NO_SANITIZE("cfi")  DhcpErrorCode RegisterDhcpClientCallBack(const char *ifname,
     return ret;
 }
 
-NO_SANITIZE("cfi") DhcpErrorCode RegisterDhcpClientL3Session(const char *ifname, uint64_t generation,
-    void (*success)(uint64_t, int, const char *, const DhcpResult *, const DhcpL3Ipv6Snapshot *),
-    void (*failure)(uint64_t, int, const char *, const char *))
+NO_SANITIZE("cfi")
+DhcpErrorCode RegisterDhcpClientL3Session(const char *ifname, uint64_t generation,
+                                          void (*success)(uint64_t, int, const char *, const DhcpResult *,
+                                                          const DhcpL3Ipv6Snapshot *),
+                                          void (*failure)(uint64_t, int, const char *, const char *))
 {
-    if (!ifname || strcmp(ifname, "sleip0") != 0 || !generation || !success || !failure) return DHCP_INVALID_PARAM;
+    if (!ifname || strcmp(ifname, "sleip0") != 0 || !generation || !success || !failure)
+        return DHCP_INVALID_PARAM;
 #ifdef OHOS_ARCH_LITE
     return DHCP_INVALID_PARAM;
 #else
-    if (!dhcpClientPtr) dhcpClientPtr = OHOS::DHCP::DhcpClient::GetInstance(DHCP_CLIENT_ABILITY_ID);
-    if (!dhcpClientPtr) return DHCP_INVALID_PARAM;
+    if (!dhcpClientPtr)
+        dhcpClientPtr = OHOS::DHCP::DhcpClient::GetInstance(DHCP_CLIENT_ABILITY_ID);
+    if (!dhcpClientPtr)
+        return DHCP_INVALID_PARAM;
     OHOS::sptr<DhcpClientCallBack> callback = new (std::nothrow) DhcpClientCallBack();
-    if (!callback) return DHCP_INVALID_PARAM;
+    if (!callback)
+        return DHCP_INVALID_PARAM;
     callback->sessionGeneration = generation;
-    callback->sessionSuccess = success; callback->sessionFailure = failure;
+    callback->sessionSuccess = success;
+    callback->sessionFailure = failure;
     return GetCErrorCode(dhcpClientPtr->RegisterDhcpClientCallBack(ifname, callback));
 #endif
 }
@@ -118,8 +125,9 @@ NO_SANITIZE("cfi") static DhcpErrorCode StartDhcpClientWithMode(const RouterConf
     routerConfig.bSpecificNetwork = config.bSpecificNetwork;
     routerConfig.isStaticIpv4 = config.isStaticIpv4;
     routerConfig.bIpv4 = config.bIpv4;
-    DhcpErrorCode ret = GetCErrorCode(clientKey == nullptr ? dhcpClientPtr->StartDhcpClient(routerConfig) :
-        OHOS::DHCP::StartDhcpClientL3Internal(routerConfig, clientKey, DHCP_CLIENT_KEY_LEN));
+    DhcpErrorCode ret = GetCErrorCode(
+        clientKey == nullptr ? dhcpClientPtr->StartDhcpClient(routerConfig)
+                             : OHOS::DHCP::StartDhcpClientL3Internal(routerConfig, clientKey, DHCP_CLIENT_KEY_LEN));
     if (ret != DHCP_SUCCESS) {
         DHCP_LOGE("[DHCP][CAdapter] start failed, ifname:%{public}s ret:%{public}d", config.ifname, ret);
     }
@@ -131,8 +139,8 @@ NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClient(const RouterConfig &config)
     return StartDhcpClientWithMode(config, nullptr);
 }
 
-NO_SANITIZE("cfi") DhcpErrorCode StartDhcpClientL3(const RouterConfig *config,
-    const uint8_t *clientKey, uint32_t keyLength)
+NO_SANITIZE("cfi")
+DhcpErrorCode StartDhcpClientL3(const RouterConfig *config, const uint8_t *clientKey, uint32_t keyLength)
 {
     if (config == nullptr || clientKey == nullptr || keyLength != DHCP_CLIENT_KEY_LEN) {
         return DHCP_INVALID_PARAM;

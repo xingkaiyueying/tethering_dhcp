@@ -35,8 +35,8 @@ private:
     size_t allLimit_ = NUM_SERVERS;
 
 public:
-    DnsServerRepository(int minLifeTime = DEFAULT_MIN_RDNSS_LIFETIME,
-        size_t currentLimit = NUM_CURRENT_SERVERS, size_t allLimit = NUM_SERVERS);
+    DnsServerRepository(int minLifeTime = DEFAULT_MIN_RDNSS_LIFETIME, size_t currentLimit = NUM_CURRENT_SERVERS,
+                        size_t allLimit = NUM_SERVERS);
     ~DnsServerRepository();
     bool Clear(); // clear all dns server info
     bool Expire();

@@ -123,7 +123,7 @@ int DhcpClientStub::OnRemoteRequest(uint32_t code, MessageParcel &data, MessageP
 int DhcpClientStub::OnRegisterCallBack(uint32_t code, MessageParcel &data, MessageParcel &reply, MessageOption &option)
 {
     DHCP_LOGI("[DHCP][ClientStub] register callback request, code:%{public}u datasize:%{public}zu", code,
-        data.GetRawDataSize());
+              data.GetRawDataSize());
     sptr<IRemoteObject> remote = data.ReadRemoteObject();
     if (remote == nullptr) {
         DHCP_LOGE("Failed to ReadRemoteObject!");
@@ -155,7 +155,7 @@ int DhcpClientStub::OnRegisterCallBack(uint32_t code, MessageParcel &data, Messa
     ErrCode ret = RegisterDhcpClientCallBack(ifName, callback_);
     if (ret != DHCP_E_SUCCESS) {
         DHCP_LOGE("[DHCP][ClientStub] register callback rejected, ifname:%{public}s ret:%{public}d", ifName.c_str(),
-            static_cast<int32_t>(ret));
+                  static_cast<int32_t>(ret));
     } else {
         DHCP_LOGI("[DHCP][ClientStub] register callback succeeded, ifname:%{public}s", ifName.c_str());
     }
@@ -166,8 +166,7 @@ int DhcpClientStub::OnRegisterCallBack(uint32_t code, MessageParcel &data, Messa
 
 int DhcpClientStub::OnStartDhcpClient(uint32_t code, MessageParcel &data, MessageParcel &reply, MessageOption &option)
 {
-    DHCP_LOGI("[DHCP][ClientStub] start request, code:%{public}u datasize:%{public}zu", code,
-        data.GetRawDataSize());
+    DHCP_LOGI("[DHCP][ClientStub] start request, code:%{public}u datasize:%{public}zu", code, data.GetRawDataSize());
     RouterConfig config;
     if (!data.ReadString(config.ifname) || !data.ReadString(config.bssid) ||
         !data.ReadBool(config.prohibitUseCacheIp) || !data.ReadBool(config.bIpv6) ||
@@ -194,10 +193,10 @@ int DhcpClientStub::OnStartDhcpClient(uint32_t code, MessageParcel &data, Messag
     ErrCode ret = StartDhcpClient(config);
     if (ret != DHCP_E_SUCCESS) {
         DHCP_LOGE("[DHCP][ClientStub] start rejected, ifname:%{public}s mode:%{public}u ret:%{public}d",
-            config.ifname.c_str(), linkMode, static_cast<int32_t>(ret));
+                  config.ifname.c_str(), linkMode, static_cast<int32_t>(ret));
     } else {
         DHCP_LOGI("[DHCP][ClientStub] start accepted, ifname:%{public}s mode:%{public}u", config.ifname.c_str(),
-            linkMode);
+                  linkMode);
     }
     reply.WriteInt32(0);
     reply.WriteInt32(ret);

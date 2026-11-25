@@ -13,12 +13,17 @@
  * limitations under the License.
  */
 
+#include <vector>
 #include <cerrno>
 #include <csignal>
 #include <stdint.h>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <map>
+#include <thread>
+#include <chrono>
+#include "dhcp_nearlink_scope.h"
 #include "dhcp_dhcpd.h"
 #include "securec.h"
 #include "address_utils.h"
@@ -40,6 +45,82 @@ static std::mutex g_dhcpConfigMutex;
 
 static PDhcpServerContext g_dhcpServer = 0;
 static DeviceConnectFun deviceConnectFun;
+static std::mutex g_nearlinkServersMutex;
+static std::map<std::string, PDhcpServerContext> g_nearlinkServers;
+
+int ServerActionCallback(int state, int code, const char *ifname);
+
+static int StartNearlinkDhcpServerMain(const std::string &ifName, const std::string &netMask,
+                                       const std::string &ipRange, const std::string &localIp)
+{
+    std::lock_guard<std::mutex> lock(g_nearlinkServersMutex);
+    auto existing = g_nearlinkServers.find(ifName);
+    if (existing != g_nearlinkServers.end()) {
+        if (GetServerStatus(existing->second) == 2)
+            return 0;
+        if (StopDhcpServer(existing->second) != RET_SUCCESS || FreeServerContext(&existing->second) != RET_SUCCESS)
+            return 1;
+        g_nearlinkServers.erase(existing);
+    }
+    DhcpConfig config{};
+    auto comma = ipRange.find(',');
+    if (comma == std::string::npos || strcpy_s(config.ifname, sizeof(config.ifname), ifName.c_str()) != EOK)
+        return 1;
+    config.serverId = ParseIpAddr(localIp.c_str());
+    config.gateway = config.serverId;
+    config.netmask = ParseIpAddr(netMask.c_str());
+    config.pool.beginAddress = ParseIpAddr(ipRange.substr(0, comma).c_str());
+    config.pool.endAddress = ParseIpAddr(ipRange.substr(comma + 1).c_str());
+    config.leaseTime = DHCP_LEASE_TIME;
+    config.renewalTime = DHCP_RENEWAL_TIME;
+    config.rebindingTime = DHCP_REBINDING_TIME;
+    if (!config.serverId || !config.netmask || !config.pool.beginAddress || !config.pool.endAddress ||
+        InitOptionList(&config.options) != RET_SUCCESS)
+        return 1;
+    DhcpOption dns = {DOMAIN_NAME_SERVER_OPTION, 0, {0}};
+    if (AppendAddressOption(&dns, config.serverId) != RET_SUCCESS ||
+        PushBackOption(&config.options, &dns) != RET_SUCCESS) {
+        FreeOptionList(&config.options);
+        return 1;
+    }
+    DhcpNearlinkBindingScope scope(ifName);
+    auto context = InitializeServer(&config);
+    FreeOptionList(&config.options);
+    if (!context)
+        return 1;
+    RegisterDhcpCallback(context, ServerActionCallback);
+    RegisterDeviceChangedCallback(context, deviceConnectFun);
+    if (StartDhcpServer(context) != RET_SUCCESS) {
+        StopDhcpServer(context);
+        if (FreeServerContext(&context) != RET_SUCCESS)
+            g_nearlinkServers.emplace(ifName, context);
+        return 1;
+    }
+    // Keep ownership until the worker is RUNNING or a failed start has drained.
+    for (int i = 0; i < 100 && GetServerStatus(context) == 1; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (GetServerStatus(context) != 2) {
+        StopDhcpServer(context);
+        if (FreeServerContext(&context) != RET_SUCCESS)
+            g_nearlinkServers.emplace(ifName, context);
+        return 1;
+    }
+    g_nearlinkServers.emplace(ifName, context);
+    return 0;
+}
+
+int StopNearlinkDhcpServerMain(const std::string &ifName)
+{
+    std::lock_guard<std::mutex> lock(g_nearlinkServersMutex);
+    auto found = g_nearlinkServers.find(ifName);
+    if (found == g_nearlinkServers.end())
+        return 0;
+    DhcpNearlinkBindingScope scope(ifName);
+    if (StopDhcpServer(found->second) != RET_SUCCESS || FreeServerContext(&found->second) != RET_SUCCESS)
+        return 1;
+    g_nearlinkServers.erase(found);
+    return 0;
+}
 enum SignalEvent {
     EXIT = 0,
     RELOAD,
@@ -358,6 +439,8 @@ int StartDhcpServerMain(const std::string& ifName, const std::string& netMask, c
     const std::string& localIp)
 {
     DHCP_LOGI("StartDhcpServerMain.");
+    if (IsNearlinkDhcpInterface(ifName))
+        return StartNearlinkDhcpServerMain(ifName, netMask, ipRange, localIp);
 
     if (InitArguments() != RET_SUCCESS) {
         DHCP_LOGE("failed to init arguments table.");

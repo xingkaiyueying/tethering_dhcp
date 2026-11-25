@@ -15,25 +15,36 @@
 #ifndef DHCP_NEARLINK_SCOPE_H
 #define DHCP_NEARLINK_SCOPE_H
 
-#include <cstring>
+#include <cctype>
+#include <string>
 
-// The server worker selects its private binding namespace for one request.
-// The worker uses the existing DHCP structures and function-pointer signatures.
-extern thread_local bool g_nearlinkBindingScope;
-class NearlinkDhcpBindingScope final {
+inline bool IsNearlinkDhcpInterface(const std::string &iface)
+{
+    if (iface.size() < 6 || iface.size() >= 16 || iface.compare(0, 5, "sleip") != 0) {
+        return false;
+    }
+    for (size_t i = 5; i < iface.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(iface[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+// Select the current interface's binding records for calls through the existing pool callbacks.
+std::string SetNearlinkBindingScope(const std::string &iface);
+bool HasNearlinkBindingScope();
+
+class DhcpNearlinkBindingScope final {
 public:
-    explicit NearlinkDhcpBindingScope(const char *iface) : previous_(g_nearlinkBindingScope)
+    explicit DhcpNearlinkBindingScope(const std::string &iface) : previous_(SetNearlinkBindingScope(iface)) {}
+    ~DhcpNearlinkBindingScope()
     {
-        g_nearlinkBindingScope = iface && std::strcmp(iface, "sleip0") == 0;
+        SetNearlinkBindingScope(previous_);
     }
-    ~NearlinkDhcpBindingScope()
-    {
-        g_nearlinkBindingScope = previous_;
-    }
-    NearlinkDhcpBindingScope(const NearlinkDhcpBindingScope &) = delete;
-    NearlinkDhcpBindingScope &operator=(const NearlinkDhcpBindingScope &) = delete;
+    DhcpNearlinkBindingScope(const DhcpNearlinkBindingScope &) = delete;
+    DhcpNearlinkBindingScope &operator=(const DhcpNearlinkBindingScope &) = delete;
 
 private:
-    bool previous_;
+    std::string previous_;
 };
 #endif

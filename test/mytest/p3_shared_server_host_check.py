@@ -98,8 +98,8 @@ int main(){
  assert(unique.size()==32);
  DhcpMsgInfo message;message.packet.chaddr[0]=2;message.packet.chaddr[5]=1;
  auto original=GetBinding(&pool,&message)->ipAddress;
- {NearlinkDhcpBindingScope legacy("wlan0");auto binding=AddNewBinding(message.packet.chaddr,&message.options);binding->ipAddress=0xc0a80102;
-  {NearlinkDhcpBindingScope scope("sleip0");assert(QueryBinding(message.packet.chaddr,nullptr)->ipAddress==original);}
+ {DhcpNearlinkBindingScope legacy("wlan0");auto binding=AddNewBinding(message.packet.chaddr,&message.options);binding->ipAddress=0xc0a80102;
+  {DhcpNearlinkBindingScope scope("sleip0");assert(QueryBinding(message.packet.chaddr,nullptr)->ipAddress==original);}
   assert(QueryBinding(message.packet.chaddr,nullptr)->ipAddress==0xc0a80102);
  }
  pool.addressRange={0xac180102,0xac1801fe};pool.gateway=pool.serverId=0xac180101;

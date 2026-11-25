@@ -212,12 +212,12 @@ ErrCode DhcpClientServiceImpl::RegisterDhcpClientCallBack(const std::string& ifn
     DHCP_LOGI("[DHCP][ClientService] register callback begin, ifname:%{public}s", ifname.c_str());
     if (!DhcpPermissionUtils::VerifyIsNativeProcess()) {
         DHCP_LOGE("[DHCP][ClientService] register callback failed at native-process check, ifname:%{public}s",
-            ifname.c_str());
+                  ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     if (!DhcpPermissionUtils::VerifyDhcpNetworkPermission("ohos.permission.NETWORK_DHCP")) {
         DHCP_LOGE("[DHCP][ClientService] register callback failed at NETWORK_DHCP check, ifname:%{public}s",
-            ifname.c_str());
+                  ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     std::lock_guard<std::mutex> autoLock(m_clientCallBackMutex);
@@ -228,8 +228,10 @@ ErrCode DhcpClientServiceImpl::RegisterDhcpClientCallBack(const std::string& ifn
     } else {
         uint32_t registerNum = m_mapClientCallBack.size();
         if (registerNum > MAX_REGISTER_CLIENT_NUM) {
-            DHCP_LOGE("[DHCP][ClientService] register callback failed: limit reached, ifname:%{public}s "
-                "count:%{public}u", ifname.c_str(), registerNum);
+            DHCP_LOGE(
+                "[DHCP][ClientService] register callback failed: limit reached, ifname:%{public}s "
+                "count:%{public}u",
+                ifname.c_str(), registerNum);
             return DHCP_E_FAILED;
         }
 #ifdef OHOS_ARCH_LITE
@@ -246,17 +248,17 @@ ErrCode DhcpClientServiceImpl::RegisterDhcpClientCallBack(const std::string& ifn
 
 ErrCode DhcpClientServiceImpl::StartDhcpClient(const RouterConfig &config)
 {
-    DHCP_LOGI("[DHCP][ClientService] start begin, ifname:%{public}s ipv4:%{public}d ipv6:%{public}d "
-        "static:%{public}d mode:%{public}u", config.ifname.c_str(), config.bIpv4, config.bIpv6,
-        config.isStaticIpv4, static_cast<uint8_t>(config.linkMode));
+    DHCP_LOGI(
+        "[DHCP][ClientService] start begin, ifname:%{public}s ipv4:%{public}d ipv6:%{public}d "
+        "static:%{public}d mode:%{public}u",
+        config.ifname.c_str(), config.bIpv4, config.bIpv6, config.isStaticIpv4, static_cast<uint8_t>(config.linkMode));
     if (!DhcpPermissionUtils::VerifyIsNativeProcess()) {
         DHCP_LOGE("[DHCP][ClientService] start failed at native-process check, ifname:%{public}s",
-            config.ifname.c_str());
+                  config.ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     if (!DhcpPermissionUtils::VerifyDhcpNetworkPermission("ohos.permission.NETWORK_DHCP")) {
-        DHCP_LOGE("[DHCP][ClientService] start failed at NETWORK_DHCP check, ifname:%{public}s",
-            config.ifname.c_str());
+        DHCP_LOGE("[DHCP][ClientService] start failed at NETWORK_DHCP check, ifname:%{public}s", config.ifname.c_str());
         return DHCP_E_PERMISSION_DENIED;
     }
     if (config.ifname.empty()) {
@@ -279,13 +281,13 @@ ErrCode DhcpClientServiceImpl::StartDhcpClient(const RouterConfig &config)
         if (iter != m_mapClientService.end()) {
             ErrCode ret = StartOldClient(innerCfg, iter->second);
             DHCP_LOGI("[DHCP][ClientService] existing client start complete, ifname:%{public}s ret:%{public}d",
-                innerCfg.ifname.c_str(), static_cast<int32_t>(ret));
+                      innerCfg.ifname.c_str(), static_cast<int32_t>(ret));
             return ret;
         }
     }
     ErrCode ret = StartNewClient(innerCfg);
     DHCP_LOGI("[DHCP][ClientService] new client start complete, ifname:%{public}s ret:%{public}d",
-        innerCfg.ifname.c_str(), static_cast<int32_t>(ret));
+              innerCfg.ifname.c_str(), static_cast<int32_t>(ret));
     return ret;
 }
 
@@ -353,8 +355,10 @@ ErrCode DhcpClientServiceImpl::StartOldClient(const RouterConfig &config, DhcpCl
             if (!config.isStaticIpv4) {
                 int startRet = dhcpClient.pStaStateMachine->StartIpv4Type(ifname, config.bIpv6, ACTION_START_OLD);
                 if (startRet != DHCP_OPT_SUCCESS) {
-                    DHCP_LOGE("[DHCP][ClientService] existing IPv4 state machine start failed, ifname:%{public}s "
-                        "ret:%{public}d", ifname.c_str(), startRet);
+                    DHCP_LOGE(
+                        "[DHCP][ClientService] existing IPv4 state machine start failed, ifname:%{public}s "
+                        "ret:%{public}d",
+                        ifname.c_str(), startRet);
                     return DHCP_E_FAILED;
                 }
             }
@@ -382,14 +386,14 @@ ErrCode DhcpClientServiceImpl::StartNewIpv4Client(const RouterConfig &config, Dh
         int startRet = pStaState->StartIpv4Type(ifname, config.bIpv6, ACTION_START_NEW);
         if (startRet != DHCP_OPT_SUCCESS) {
             DHCP_LOGE("[DHCP][ClientService] new IPv4 state machine start failed, ifname:%{public}s ret:%{public}d",
-                ifname.c_str(), startRet);
+                      ifname.c_str(), startRet);
             delete pStaState;
             client.pStaStateMachine = nullptr;
             return DHCP_E_FAILED;
         }
     }
     DHCP_LOGI("[DHCP][ClientService] IPv4 state machine started, ifname:%{public}s mode:%{public}u", ifname.c_str(),
-        static_cast<uint8_t>(config.linkMode));
+              static_cast<uint8_t>(config.linkMode));
     return DHCP_E_SUCCESS;
 }
 
@@ -888,7 +892,7 @@ int DhcpClientServiceImpl::DhcpIpv4ResultFail(struct DhcpIpResult &ipResult)
         (iter->second)->OnIpFailChanged(DHCP_OPT_FAILED, ifname.c_str(), "get dhcp ip result failed!");
     }
     DHCP_LOGI("[DHCP][ClientService] IPv4 failure callback dispatched, ifname:%{public}s action:%{public}d",
-        ifname.c_str(), action);
+              ifname.c_str(), action);
     return DHCP_OPT_SUCCESS;
 }
 
@@ -968,7 +972,8 @@ void DhcpClientServiceImpl::FillDhcpResultFromIpv6Info(DhcpResult& result, const
     result.raFlags = info.raFlags;
     result.l3Ipv6 = info.l3Ipv6;
     result.l3Addresses = info.l3Addresses;
-    uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    uint64_t now =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     for (auto &address : result.l3Addresses) {
         uint64_t elapsed = now > address.observedAt ? now - address.observedAt : 0;
         auto remaining = [elapsed](uint32_t life) -> uint32_t {
